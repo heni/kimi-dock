@@ -3,6 +3,7 @@ import KimiWebView from './components/KimiWebView'
 import TitleBar from './components/TitleBar'
 import Settings from './components/Settings'
 import ConversationSidebar from './components/ConversationSidebar'
+import EditorView from './components/EditorView'
 import { Conversation, offlineManager } from './utils/offlineManager'
 
 // Error Boundary for catching React errors
@@ -73,6 +74,13 @@ function App(): React.JSX.Element {
   const [isNetworkOffline, setIsNetworkOffline] = useState(!navigator.onLine)
   const [forceOffline, setForceOffline] = useState(false)
   const [hasSession, setHasSession] = useState(false)
+  // Three surfaces in the main area: webview / offline chat (both inside
+  // KimiWebView) / artifact editor. The editor never unmounts the webview —
+  // it is CSS-hidden, so switching back is instant and the kimi.ai SPA keeps
+  // its state.
+  const [surface, setSurface] = useState<'chat' | 'editor'>('chat')
+  const [editorChatId, setEditorChatId] = useState<string | null>(null)
+  const [runSkillArmed, setRunSkillArmed] = useState(false)
 
   // Effective offline: network down, or the user forced offline mode
   // (title bar toggle / Settings → Advanced) — e.g. for debugging.
@@ -133,6 +141,25 @@ function App(): React.JSX.Element {
     setCurrentConversation(conversation)
   }, [])
 
+  const handleOpenArtifacts = useCallback((conversation: Conversation) => {
+    setEditorChatId(conversation.id)
+    setSurface('editor')
+  }, [])
+
+  const handleToggleEditor = useCallback(() => {
+    setSurface((prev) => {
+      if (prev === 'editor') return 'chat'
+      // Opening from the title bar: default to the selected chat's artifacts.
+      setEditorChatId((current) => {
+        if (current) return current
+        return currentConversation && currentConversation.id !== 'new'
+          ? currentConversation.id
+          : null
+      })
+      return 'editor'
+    })
+  }, [currentConversation])
+
   return (
     <ErrorBoundary>
       <div
@@ -148,6 +175,8 @@ function App(): React.JSX.Element {
         <TitleBar
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenSidebar={() => setIsSidebarOpen(true)}
+          onToggleEditor={handleToggleEditor}
+          editorActive={surface === 'editor'}
           isOffline={isOffline}
           forceOffline={forceOffline}
         />
@@ -160,15 +189,36 @@ function App(): React.JSX.Element {
             currentConversationId={currentConversation?.id}
           />
 
-          <div style={{ flex: 1, position: 'relative' }}>
+          <div
+            style={{
+              flex: 1,
+              position: 'relative',
+              display: surface === 'editor' ? 'none' : 'block'
+            }}
+          >
             <KimiWebView
               currentConversation={currentConversation}
               isOffline={isOffline}
               forceOffline={forceOffline}
               hasSession={hasSession}
               onAuthRequired={() => setIsSettingsOpen(true)}
+              onOpenArtifacts={handleOpenArtifacts}
+              runSkillArmed={runSkillArmed}
+              onDisarmRunSkill={() => setRunSkillArmed(false)}
             />
           </div>
+
+          {surface === 'editor' && (
+            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+              <EditorView
+                key={editorChatId ?? 'picker'}
+                chatId={editorChatId}
+                onClose={() => setSurface('chat')}
+                skillArmed={runSkillArmed}
+                onToggleSkill={() => setRunSkillArmed((armed) => !armed)}
+              />
+            </div>
+          )}
         </div>
 
         <Settings
