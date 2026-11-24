@@ -43,6 +43,7 @@ if (!rendererEntry) throw new Error('renderer bundle not found inside app.asar')
 const targets = ['out/main/index.js', 'out/preload/index.js', rendererEntry]
 const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'kimi-verify-asar-'))
 const bundles = []
+let failed = false
 
 try {
   for (const entry of targets) {
@@ -60,7 +61,6 @@ try {
 
   // A token "shipped" if it reached at least one bundle (e.g. the
   // settings-changed event name lives in main + preload, never renderer).
-  let failed = false
   for (const needle of expected) {
     const hits = bundles.filter((b) => b.text.includes(needle)).map((b) => b.name)
     console.log(
@@ -68,9 +68,11 @@ try {
     )
     if (hits.length === 0) failed = true
   }
-  if (failed) process.exit(1)
-  console.log('[verify-artifact] PASS')
+  if (!failed) console.log('[verify-artifact] PASS')
 } finally {
   process.chdir(repoRoot)
   fs.rmSync(tempDir, { recursive: true, force: true })
 }
+
+// Single exit point, after the finally above has cleaned up the temp dir.
+process.exit(failed ? 1 : 0)
