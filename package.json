@@ -28,15 +28,19 @@
     "test:unit": "rm -rf .tmp/unit-build && tsc -p test/tsconfig.unit.json && echo '{\"type\":\"module\"}' > .tmp/unit-build/package.json && node --test 'test/*.test.mjs'"
   },
   "dependencies": {
+    "@codemirror/language-data": "^6.5.2",
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@iarna/rtf-to-html": "^1.1.0",
-    "electron-updater": "^6.3.9"
+    "codemirror": "^6.0.2",
+    "electron-updater": "^6.3.9",
+    "markdown-it": "^15.0.3"
   },
   "devDependencies": {
     "@electron-toolkit/eslint-config-prettier": "^3.0.0",
     "@electron-toolkit/eslint-config-ts": "^3.1.0",
     "@electron-toolkit/tsconfig": "^2.0.0",
+    "@types/markdown-it": "^14.2.0",
     "@types/node": "^22.19.1",
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
