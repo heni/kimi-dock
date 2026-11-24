@@ -77,9 +77,11 @@ function App(): React.JSX.Element {
   // Three surfaces in the main area: webview / offline chat (both inside
   // KimiWebView) / artifact editor. The editor never unmounts the webview —
   // it is CSS-hidden, so switching back is instant and the kimi.ai SPA keeps
-  // its state.
+  // its state. Once opened, the editor stays mounted and CSS-hidden too:
+  // unsaved buffers survive surface switches.
   const [surface, setSurface] = useState<'chat' | 'editor'>('chat')
   const [editorChatId, setEditorChatId] = useState<string | null>(null)
+  const [editorMounted, setEditorMounted] = useState(false)
   const [runSkillArmed, setRunSkillArmed] = useState(false)
 
   // Effective offline: network down, or the user forced offline mode
@@ -143,12 +145,14 @@ function App(): React.JSX.Element {
 
   const handleOpenArtifacts = useCallback((conversation: Conversation) => {
     setEditorChatId(conversation.id)
+    setEditorMounted(true)
     setSurface('editor')
   }, [])
 
   const handleToggleEditor = useCallback(() => {
     setSurface((prev) => {
       if (prev === 'editor') return 'chat'
+      setEditorMounted(true)
       // Opening from the title bar: default to the selected chat's artifacts.
       setEditorChatId((current) => {
         if (current) return current
@@ -208,11 +212,19 @@ function App(): React.JSX.Element {
             />
           </div>
 
-          {surface === 'editor' && (
-            <div style={{ flex: 1, position: 'relative', overflow: 'hidden' }}>
+          {editorMounted && (
+            <div
+              style={{
+                flex: 1,
+                position: 'relative',
+                overflow: 'hidden',
+                display: surface === 'editor' ? 'block' : 'none'
+              }}
+            >
               <EditorView
                 key={editorChatId ?? 'picker'}
                 chatId={editorChatId}
+                active={surface === 'editor'}
                 onClose={() => setSurface('chat')}
                 skillArmed={runSkillArmed}
                 onToggleSkill={() => setRunSkillArmed((armed) => !armed)}

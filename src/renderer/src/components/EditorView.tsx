@@ -7,6 +7,7 @@ import '../assets/EditorView.css'
 
 interface EditorViewProps {
   chatId: string | null
+  active: boolean
   onClose: () => void
   skillArmed: boolean
   onToggleSkill: () => void
@@ -26,6 +27,7 @@ const isMarkdown = (path: string | null): boolean => path !== null && /\.(md|mar
 // markdown preview with scroll sync, and the tier-1 run console docked below.
 export default function EditorView({
   chatId,
+  active,
   onClose,
   skillArmed,
   onToggleSkill
@@ -84,6 +86,37 @@ export default function EditorView({
   useEffect(() => {
     void refreshFiles()
   }, [refreshFiles])
+
+  // The workspace root can change while the editor stays mounted (Settings →
+  // Workspace Folder): the open buffer belongs to the old root, so close it
+  // and re-init instead of writing it into the new root on the next save.
+  const workspaceRootRef = useRef<string | null | undefined>(undefined)
+  useEffect(() => {
+    let cancelled = false
+    window.api
+      ?.getSettings?.()
+      .then((settings) => {
+        if (!cancelled && workspaceRootRef.current === undefined) {
+          workspaceRootRef.current = settings?.workspaceRoot ?? null
+        }
+      })
+      .catch(() => {})
+    const off = window.api?.onSettingsChanged?.((settings) => {
+      const next = settings?.workspaceRoot ?? null
+      const prev = workspaceRootRef.current
+      workspaceRootRef.current = next
+      if (prev === undefined || prev === next) return
+      setCurrentFile(null)
+      setFileContent('')
+      setSavedContent('')
+      void initWorkspace()
+      void refreshFiles()
+    })
+    return () => {
+      cancelled = true
+      off?.()
+    }
+  }, [initWorkspace, refreshFiles])
 
   const openFile = useCallback(
     async (path: string): Promise<void> => {
@@ -148,8 +181,11 @@ export default function EditorView({
   }
 
   // Markdown shortcuts (VS Code): Ctrl+Shift+V toggles the preview,
-  // Ctrl+K V opens the split.
+  // Ctrl+K V opens the split. No listener while the editor is hidden: the
+  // mounted-but-hidden editor must not intercept keystrokes on the chat
+  // surface.
   useEffect(() => {
+    if (!active) return
     const handleKeyDown = (event: KeyboardEvent): void => {
       if (!isMarkdown(currentFile)) return
       if (event.ctrlKey && event.shiftKey && event.key === 'V') {
@@ -172,7 +208,7 @@ export default function EditorView({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [currentFile])
+  }, [active, currentFile])
 
   // Two-way scroll sync in split mode (ratio-based, loop-guarded).
   useEffect(() => {

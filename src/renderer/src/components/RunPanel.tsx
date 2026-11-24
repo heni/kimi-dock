@@ -144,24 +144,37 @@ export default function RunPanel({
 
   const handleRun = async (): Promise<void> => {
     const cmd = command.trim()
-    if (!cmd || runningId) return
+    // Re-entry guard is the ref, not the state: it is set before the first
+    // await, so a second trigger (Enter + click) cannot slip past while the
+    // save/start round-trips are in flight.
+    if (!cmd || runningIdRef.current) return
+    runningIdRef.current = 'starting'
     // Files are saved before the run.
     const saved = await saveCurrentFile()
-    if (!saved) return
+    if (!saved) {
+      runningIdRef.current = null
+      return
+    }
 
     setChunks([])
     setExitInfo(null)
     // The resolved spec's extras (env/cwd/timeoutSec) apply only while the
     // command is the resolved one; an edited command is free-form.
     const useSpec = resolved && cmd === resolved.spec.command
-    const result = await window.api?.procStart({
-      chatId,
-      command: cmd,
-      ...(useSpec && resolved.spec.env ? { env: resolved.spec.env } : {}),
-      ...(useSpec && resolved.spec.cwd ? { cwd: resolved.spec.cwd } : {}),
-      ...(useSpec && resolved.spec.timeoutSec ? { timeoutSec: resolved.spec.timeoutSec } : {})
-    })
+    let result
+    try {
+      result = await window.api?.procStart({
+        chatId,
+        command: cmd,
+        ...(useSpec && resolved.spec.env ? { env: resolved.spec.env } : {}),
+        ...(useSpec && resolved.spec.cwd ? { cwd: resolved.spec.cwd } : {}),
+        ...(useSpec && resolved.spec.timeoutSec ? { timeoutSec: resolved.spec.timeoutSec } : {})
+      })
+    } catch (error) {
+      result = { success: false, error: (error as Error).message }
+    }
     if (!result?.success || !result.id) {
+      runningIdRef.current = null
       setChunks([{ stream: 'system', data: `Failed to start: ${result?.error ?? 'unknown'}` }])
       return
     }

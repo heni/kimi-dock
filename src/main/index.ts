@@ -908,10 +908,12 @@ ipcMain.on('open-dev-tools', () => {
 
 // The workspace root is a user setting; every handler refuses to work
 // without it (the renderer shows a "choose folder" prompt in that state).
+// Normalized once here: a hand-edited trailing slash or a relative path
+// must not break the containment check downstream.
 function getWorkspaceRoot(): string {
   const root = loadSettings().workspaceRoot
   if (!root) throw new Error('Workspace folder is not set')
-  return root
+  return resolve(root)
 }
 
 // The chat directory is exactly one level under the workspace root.

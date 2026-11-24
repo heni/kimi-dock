@@ -11,6 +11,7 @@
     "../src/renderer/src/utils/offlineManagerSchema.ts",
     "../src/renderer/src/utils/chatFlow.ts",
     "../src/main/runConfig.ts",
-    "../src/main/workspace.ts"
+    "../src/main/workspace.ts",
+    "../src/main/runner.ts"
   ]
 }

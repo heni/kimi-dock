@@ -32,6 +32,9 @@ export function startProcess(opts: StartOptions): string {
   const id = `run-${Date.now()}-${nextId++}`
   const child = spawn('/bin/bash', ['-c', opts.command], {
     cwd: opts.cwd,
+    detached: true, // own process group, so stop/timeout/quit can kill the tree
+    // No stdin in tier 1: readers get immediate EOF instead of hanging.
+    stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, ...(opts.env ?? {}) }
   })
 
@@ -41,18 +44,23 @@ export function startProcess(opts: StartOptions): string {
   child.stdout?.on('data', (chunk: Buffer) => opts.onOutput('stdout', chunk.toString('utf8')))
   child.stderr?.on('data', (chunk: Buffer) => opts.onOutput('stderr', chunk.toString('utf8')))
 
-  child.on('error', (error) => {
-    // Spawn itself failed (e.g. cwd vanished): report as output + nonzero exit.
-    opts.onOutput('stderr', `Failed to start: ${error.message}\n`)
-  })
-
-  child.on('exit', (code, signal) => {
+  const finish = (code: number | null, signal: string | null): void => {
+    if (entry.exited) return
     entry.exited = true
     if (entry.timeout) clearTimeout(entry.timeout)
     if (entry.killTimer) clearTimeout(entry.killTimer)
     running.delete(id)
     opts.onExit(code, signal)
+  }
+
+  child.on('error', (error) => {
+    // Spawn itself failed (e.g. cwd vanished): 'exit' is not guaranteed to
+    // follow an 'error', so the failure is reported here as output + exit.
+    opts.onOutput('stderr', `Failed to start: ${error.message}\n`)
+    finish(null, null)
   })
+
+  child.on('exit', finish)
 
   if (opts.timeoutSec !== undefined && Number.isFinite(opts.timeoutSec) && opts.timeoutSec > 0) {
     const sec = Math.min(opts.timeoutSec, MAX_TIMEOUT_SEC)
@@ -65,18 +73,22 @@ export function startProcess(opts: StartOptions): string {
   return id
 }
 
-// SIGTERM first, SIGKILL after a grace period.
+// SIGTERM first, SIGKILL after a grace period. The child is spawned
+// detached, so the signal goes to its whole process group: grandchildren
+// (compound commands, wrappers) die with it instead of being orphaned.
 function terminate(entry: RunningProcess): void {
   if (entry.exited) return
+  const pid = entry.child.pid
+  if (pid === undefined) return
   try {
-    entry.child.kill('SIGTERM')
+    process.kill(-pid, 'SIGTERM')
   } catch {
     return
   }
   entry.killTimer = setTimeout(() => {
     if (!entry.exited) {
       try {
-        entry.child.kill('SIGKILL')
+        process.kill(-pid, 'SIGKILL')
       } catch {
         // already gone
       }
@@ -91,9 +103,18 @@ export function stopProcess(id: string): boolean {
   return true
 }
 
-// App quit must not leave orphaned processes behind.
+// App quit must not leave orphaned processes behind: SIGKILL the whole
+// group immediately — the main process is exiting, so a SIGTERM grace
+// timer would never fire.
 export function stopAllProcesses(): void {
   for (const entry of running.values()) {
-    terminate(entry)
+    if (entry.exited) continue
+    const pid = entry.child.pid
+    if (pid === undefined) continue
+    try {
+      process.kill(-pid, 'SIGKILL')
+    } catch {
+      // already gone
+    }
   }
 }

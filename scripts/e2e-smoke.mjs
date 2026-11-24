@@ -143,7 +143,8 @@ try {
   if (restoreError) throw restoreError
 
   // 7) Artifact editor surface: the title-bar toggle swaps the main area to
-  // the editor and back; the webview stays mounted (CSS-hidden). Depending
+  // the editor and back; the webview stays mounted (CSS-hidden), and after
+  // the first open the editor does too (unsaved buffers survive). Depending
   // on whether a workspace folder is configured, the editor shows the
   // choose-folder prompt, the chat picker, or the artifact list.
   await window.click('.editor-toggle')
@@ -158,9 +159,9 @@ try {
 
   await window.click('.editor-toggle')
   await window.waitForSelector('webview.kimi-webview', { timeout: 5000 })
-  const editorGone = await window.evaluate(() => !document.querySelector('.editor-view'))
-  if (!editorGone) throw new Error('Editor surface did not close')
-  console.log('[e2e] Editor surface closed, webview restored')
+  // Keep-mounted editor: it leaves the visible surface but stays in the DOM.
+  await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
+  console.log('[e2e] Editor surface hidden, webview restored')
 
   console.log('[e2e] PASS')
 } finally {

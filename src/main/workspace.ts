@@ -37,8 +37,12 @@ export function resolveInWorkspace(root: string, relPath: string): string {
   if (path.isAbsolute(relPath)) {
     throw new Error(`Refused absolute path: ${relPath}`)
   }
-  const resolved = path.resolve(root, relPath)
-  if (resolved !== root && !resolved.startsWith(root + path.sep)) {
+  const base = path.resolve(root)
+  const resolved = path.resolve(base, relPath)
+  // base may be '/' (prefix must not become '//'); a trailing separator in
+  // the root is already stripped by path.resolve.
+  const prefix = base.endsWith(path.sep) ? base : base + path.sep
+  if (resolved !== base && !resolved.startsWith(prefix)) {
     throw new Error(`Refused path outside the workspace: ${relPath}`)
   }
   return resolved

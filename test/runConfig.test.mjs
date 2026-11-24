@@ -103,8 +103,10 @@ test('most specific glob wins; exact beats patterns; ties keep definition order'
     'generic {file}'
   )
 
-  const tied = JSON.stringify({ run: { '*.py': 'first', '*.py ': 'unused' } })
-  assert.equal(resolveRun({ relPath: 'a.py', runJsonText: tied }).resolved?.spec.command, 'first')
+  // Equal specificity (same literal length, both match): the first defined
+  // pattern wins.
+  const tied = JSON.stringify({ run: { 'a*.py': 'first', 'a?.py': 'second' } })
+  assert.equal(resolveRun({ relPath: 'ab.py', runJsonText: tied }).resolved?.spec.command, 'first')
 })
 
 test('invalid run.json entries are skipped, not fatal', () => {
@@ -167,4 +169,11 @@ test('resolveInWorkspace refuses escapes, absolute paths and empties', () => {
   assert.throws(() => resolveInWorkspace('/w', '/etc/passwd'), /absolute path/)
   assert.throws(() => resolveInWorkspace('/w', ''), /Empty path/)
   assert.throws(() => resolveInWorkspace('/w', 'a\0b'), /Invalid path/)
+})
+
+test('resolveInWorkspace tolerates a trailing slash and the filesystem root', () => {
+  assert.equal(resolveInWorkspace('/w/', 'c1/a.py'), '/w/c1/a.py')
+  assert.equal(resolveInWorkspace('/w/', '.'), '/w')
+  assert.equal(resolveInWorkspace('/', 'home'), '/home')
+  assert.throws(() => resolveInWorkspace('/w/', '../etc'), /outside the workspace/)
 })
