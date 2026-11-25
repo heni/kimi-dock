@@ -13,6 +13,8 @@ interface RunPanelProps {
   skillArmed: boolean
   onToggleSkill: () => void
   saveCurrentFile: () => Promise<boolean>
+  // EditorView's surface-level Ctrl+F5 fires whatever is registered here.
+  registerRun?: (fn: (() => Promise<void>) | null) => void
 }
 
 interface OutputChunk {
@@ -43,7 +45,8 @@ export default function RunPanel({
   currentFile,
   skillArmed,
   onToggleSkill,
-  saveCurrentFile
+  saveCurrentFile,
+  registerRun
 }: RunPanelProps): React.JSX.Element {
   const [resolved, setResolved] = useState<ResolvedRun | null>(null)
   const [runJsonError, setRunJsonError] = useState<string | null>(null)
@@ -142,11 +145,11 @@ export default function RunPanel({
     [chatId]
   )
 
-  const handleRun = async (): Promise<void> => {
+  const handleRun = useCallback(async (): Promise<void> => {
     const cmd = command.trim()
     // Re-entry guard is the ref, not the state: it is set before the first
-    // await, so a second trigger (Enter + click) cannot slip past while the
-    // save/start round-trips are in flight.
+    // await, so a second trigger (Enter + click + Ctrl+F5) cannot slip past
+    // while the save/start round-trips are in flight.
     if (!cmd || runningIdRef.current) return
     runningIdRef.current = 'starting'
     // Files are saved before the run.
@@ -181,7 +184,15 @@ export default function RunPanel({
     runningIdRef.current = result.id
     setRunningId(result.id)
     pushHistory(cmd)
-  }
+  }, [command, resolved, chatId, saveCurrentFile, pushHistory])
+
+  // Surface-level Ctrl+F5 (EditorView's gated keydown) runs the same path
+  // as the ▶ Run button.
+  useEffect(() => {
+    if (!registerRun) return
+    registerRun(handleRun)
+    return () => registerRun(null)
+  }, [registerRun, handleRun])
 
   const handleStop = (): void => {
     if (runningIdRef.current) void window.api?.procStop(runningIdRef.current)
@@ -199,9 +210,9 @@ export default function RunPanel({
         <button
           className={`run-skill-btn${skillArmed ? ' armed' : ''}`}
           onClick={onToggleSkill}
-          title="run.json assistant skill: when armed, the offline chat attaches the run.json instructions to your messages"
+          title="AI run.json assistant: while armed, your offline-chat messages carry the run.json authoring instructions, so the AI can write or fix this chat's run.json. Click to arm/disarm."
         >
-          ?
+          AI: run.json
         </button>
       </div>
 
@@ -248,6 +259,7 @@ export default function RunPanel({
             className="run-start-btn"
             onClick={() => void handleRun()}
             disabled={!command.trim() || !currentFile}
+            title="Ctrl+F5"
           >
             ▶ Run
           </button>

@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.6] - 2026-11-25
+
+### Added
+
+- **Editor shortcuts that work surface-wide** — Ctrl+S saves the current
+  file from any focus inside the artifact editor (previously only while
+  the code editor had keyboard focus, despite the button tooltip), and
+  Ctrl+F5 runs the current file (VS Code's "Run Without Debugging"). Both
+  live in the editor-surface-gated listener: a hidden editor intercepts
+  nothing, and Ctrl+Shift+S (sidebar) is unaffected.
+- **Shortcuts & help panel** — F1 or the title-bar "?" opens a built-in
+  list of every keyboard shortcut plus explanations of the non-obvious
+  buttons; Esc closes it. The README shortcut table is synced.
+
+### Changed
+
+- **The run console's bare "?" button is now labelled "AI: run.json"** —
+  the glyph read as "help" while actually arming the run.json authoring
+  skill; the tooltip now spells out what arming does.
+
 ## [3.5.5] - 2026-11-25
 
 ### Fixed

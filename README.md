@@ -123,10 +123,17 @@ history, or everything — the OAuth session is cleared with "all data".
 
 ## Keyboard shortcuts
 
-| Shortcut           | Action                      |
-| ------------------ | --------------------------- |
-| `Ctrl + ,`         | Open Settings               |
-| `Ctrl + Shift + S` | Toggle conversation sidebar |
+Press `F1` (or the title-bar `?`) in the app for the built-in list.
+
+| Shortcut           | Action                                  |
+| ------------------ | --------------------------------------- |
+| `Ctrl + ,`         | Open Settings                           |
+| `Ctrl + Shift + S` | Toggle conversation sidebar             |
+| `Ctrl + S`         | Save the current file (artifact editor) |
+| `Ctrl + F5`        | Run the current file (artifact editor)  |
+| `Ctrl + Shift + V` | Markdown: toggle edit / preview         |
+| `Ctrl + K V`       | Markdown: open the split view           |
+| `F1`               | Keyboard shortcuts & help               |
 
 ## Development
 
