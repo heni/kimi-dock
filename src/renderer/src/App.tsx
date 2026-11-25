@@ -2,6 +2,7 @@ import { Component, ReactNode, useState, useEffect, useCallback } from 'react'
 import KimiWebView from './components/KimiWebView'
 import TitleBar from './components/TitleBar'
 import Settings from './components/Settings'
+import HelpModal from './components/HelpModal'
 import ConversationSidebar from './components/ConversationSidebar'
 import EditorView from './components/EditorView'
 import { Conversation, offlineManager } from './utils/offlineManager'
@@ -69,6 +70,7 @@ class ErrorBoundary extends Component<
 
 function App(): React.JSX.Element {
   const [isSettingsOpen, setIsSettingsOpen] = useState(false)
+  const [isHelpOpen, setIsHelpOpen] = useState(false)
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [isNetworkOffline, setIsNetworkOffline] = useState(!navigator.onLine)
@@ -180,6 +182,7 @@ function App(): React.JSX.Element {
           onOpenSettings={() => setIsSettingsOpen(true)}
           onOpenSidebar={() => setIsSidebarOpen(true)}
           onToggleEditor={handleToggleEditor}
+          onOpenHelp={() => setIsHelpOpen(true)}
           editorActive={surface === 'editor'}
           isOffline={isOffline}
           forceOffline={forceOffline}
@@ -240,6 +243,8 @@ function App(): React.JSX.Element {
             checkSession() // Refresh OAuth session status
           }}
         />
+
+        <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
       </div>
     </ErrorBoundary>
   )

@@ -148,3 +148,13 @@
     background: #1a1a1a;
   }
 }
+
+.menu-help {
+  font-size: 13px;
+  font-weight: 600;
+  color: #aaa;
+}
+
+.menu-help:hover {
+  color: #fff;
+}

@@ -46,6 +46,12 @@ export default function EditorView({
   const previewRef = useRef<HTMLDivElement | null>(null)
   const scrollSyncingRef = useRef(false)
   const chordRef = useRef(false)
+  // RunPanel registers its run handler here; the gated keydown below fires
+  // it on Ctrl+F5.
+  const runTriggerRef = useRef<(() => Promise<void>) | null>(null)
+  const registerRun = useCallback((fn: (() => Promise<void>) | null): void => {
+    runTriggerRef.current = fn
+  }, [])
 
   const dirty = fileContent !== savedContent
 
@@ -180,13 +186,28 @@ export default function EditorView({
     }
   }
 
-  // Markdown shortcuts (VS Code): Ctrl+Shift+V toggles the preview,
-  // Ctrl+K V opens the split. No listener while the editor is hidden: the
+  // Surface-level shortcuts, gated on the editor being visible (the
   // mounted-but-hidden editor must not intercept keystrokes on the chat
-  // surface.
+  // surface). Ctrl+S saves from any focus — the CodeMirror keymap handles
+  // the focused case and preventDefaults it, so defaultPrevented skips the
+  // double save; Ctrl+Shift+S (sidebar) is excluded by !shiftKey. Ctrl+F5
+  // runs the current file (VS Code "Run Without Debugging") through the
+  // trigger RunPanel registers. The markdown preview shortcuts below stay
+  // markdown-only.
   useEffect(() => {
     if (!active) return
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.ctrlKey && !event.shiftKey && (event.key === 's' || event.key === 'S')) {
+        if (event.defaultPrevented) return
+        event.preventDefault()
+        void saveCurrentFile()
+        return
+      }
+      if (event.ctrlKey && event.key === 'F5') {
+        event.preventDefault()
+        void runTriggerRef.current?.()
+        return
+      }
       if (!isMarkdown(currentFile)) return
       if (event.ctrlKey && event.shiftKey && event.key === 'V') {
         event.preventDefault()
@@ -208,7 +229,7 @@ export default function EditorView({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [active, currentFile])
+  }, [active, currentFile, saveCurrentFile])
 
   // Two-way scroll sync in split mode (ratio-based, loop-guarded).
   useEffect(() => {
@@ -424,6 +445,7 @@ export default function EditorView({
             skillArmed={skillArmed}
             onToggleSkill={onToggleSkill}
             saveCurrentFile={saveCurrentFile}
+            registerRun={registerRun}
           />
         )}
       </div>

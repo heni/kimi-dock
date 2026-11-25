@@ -5,6 +5,7 @@ interface TitleBarProps {
   onOpenSettings: () => void
   onOpenSidebar: () => void
   onToggleEditor: () => void
+  onOpenHelp: () => void
   editorActive: boolean
   isOffline: boolean
   forceOffline: boolean
@@ -14,6 +15,7 @@ export default function TitleBar({
   onOpenSettings,
   onOpenSidebar,
   onToggleEditor,
+  onOpenHelp,
   editorActive,
   isOffline,
   forceOffline
@@ -50,11 +52,17 @@ export default function TitleBar({
         e.preventDefault()
         onOpenSidebar()
       }
+
+      // F1: Keyboard shortcuts & help
+      if (e.key === 'F1') {
+        e.preventDefault()
+        onOpenHelp()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [onOpenSettings, onOpenSidebar])
+  }, [onOpenSettings, onOpenSidebar, onOpenHelp])
 
   const handleMinimize = useCallback(() => {
     console.log('Minimize clicked')
@@ -191,6 +199,10 @@ export default function TitleBar({
             <path d="M8.53 16.39a5 5 0 0 1 6.95 0" />
             <path d="M12 20h.01" />
           </svg>
+        </button>
+
+        <button className="window-btn menu-help" onClick={onOpenHelp} title="Shortcuts & help (F1)">
+          ?
         </button>
 
         <button
