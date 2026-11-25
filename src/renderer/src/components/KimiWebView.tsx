@@ -36,6 +36,7 @@ interface KimiWebViewProps {
   isOffline: boolean
   forceOffline: boolean
   hasSession: boolean
+  settingsReady: boolean
   onAuthRequired: () => void
   onOpenArtifacts: (conversation: Conversation) => void
   runSkillArmed: boolean
@@ -47,6 +48,7 @@ export default function KimiWebView({
   isOffline,
   forceOffline,
   hasSession,
+  settingsReady,
   onAuthRequired,
   onOpenArtifacts,
   runSkillArmed,
@@ -82,10 +84,12 @@ export default function KimiWebView({
   }, [])
   // Keep-mounted (docs/ui-design.md §6): once the webview first mounts, the
   // offline view only CSS-hides it — repeat offline↔online transitions
-  // return to the live SPA instantly, without a reload. It mounts lazily:
-  // a boot into offline mode renders no webview until the first transition
-  // (the effect below, after showOfflineView is derived).
-  const [webviewMounted, setWebviewMounted] = useState(() => navigator.onLine && !isOffline)
+  // return to the live SPA instantly, without a reload. It mounts lazily
+  // and only after the settings are known (the effect below): a boot into
+  // offline mode — network or forced — renders no webview until the first
+  // transition. isOffline alone cannot gate the first paint: the forced
+  // flag arrives asynchronously from settings.
+  const [webviewMounted, setWebviewMounted] = useState(false)
   // Set on the first did-finish-load: a loaded SPA self-heals reconnects,
   // so passive transitions stop showing loading states and reloading.
   const loadedOnceRef = useRef(false)
@@ -150,14 +154,25 @@ export default function KimiWebView({
     return () => unsubscribe?.()
   }, [])
 
-  // Shared online transition: a brief 'checking', then online. The loading
-  // state goes up only when a real load will happen (the webview has never
-  // finished one) — a loaded SPA self-heals reconnects, so repeat
-  // transitions are instant with nothing to spin for.
+  // Shared online transition: a brief 'checking', then online. A loaded SPA
+  // self-heals reconnects — repeat transitions are instant, nothing spins.
+  // But a FAILED first load is wedged (the auto-retry only runs while
+  // navigator.onLine), so the transition must re-drive it, or the skeleton
+  // never clears.
   const goOnlineTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const goOnline = useCallback((): void => {
     setConnectionStatus('checking')
-    setIsLoading(!loadedOnceRef.current)
+    if (!loadedOnceRef.current) {
+      setIsLoading(true)
+      const webview = webviewRef.current
+      if (webview && loadError) {
+        setLoadError(null)
+        setRetryCount(0)
+        webview.reload()
+      }
+    } else {
+      setIsLoading(false)
+    }
     if (goOnlineTimeoutRef.current) clearTimeout(goOnlineTimeoutRef.current)
     goOnlineTimeoutRef.current = setTimeout(() => {
       goOnlineTimeoutRef.current = null
@@ -165,7 +180,7 @@ export default function KimiWebView({
       setLoadError(null)
       setRetryCount(0)
     }, 1000)
-  }, [])
+  }, [loadError])
 
   // Network status monitoring
   useEffect(() => {
@@ -202,10 +217,11 @@ export default function KimiWebView({
   const showOfflineView = isOffline || connectionStatus === 'offline'
 
   // First transition out of the offline view mounts the (lazy) webview;
-  // afterwards it stays mounted and only CSS-hidden.
+  // afterwards it stays mounted and only CSS-hidden. Gated on settingsReady:
+  // before the forced-offline flag arrives, showOfflineView is unreliable.
   useEffect(() => {
-    if (!showOfflineView) setWebviewMounted(true)
-  }, [showOfflineView])
+    if (settingsReady && !showOfflineView) setWebviewMounted(true)
+  }, [settingsReady, showOfflineView])
 
   // Serial send queue. Each pass reads the stored record fresh, sends the
   // full history (each message exactly once) and, on success, marks exactly
@@ -327,6 +343,11 @@ export default function KimiWebView({
 
     const handleDidFinishLoad = (): void => {
       loadedOnceRef.current = true
+      // A pending auto-retry must not reload the now-healthy page later.
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+        retryTimeoutRef.current = null
+      }
       setIsLoading(false)
       setLoadError(null)
       setRetryCount(0)
@@ -373,7 +394,7 @@ export default function KimiWebView({
     const handleNavigate = (path: string): void => {
       const webview = webviewRef.current
       if (webview && path !== 'settings') {
-        const url = path.startsWith('http') ? path : `https://kimi.ai${path}`
+        const url = path.startsWith('http') ? path : `https://www.kimi.ai${path}`
         webview.src = url
       }
     }
@@ -392,18 +413,19 @@ export default function KimiWebView({
 
   // "Try Reconnecting" (offline view) / "Reload Page" (error surface). A
   // loaded SPA self-heals reconnects — returning to it is instant, no
-  // reload. Only a failed or never-finished first load actually reloads.
+  // reload. Only a failed or never-finished first load actually reloads;
+  // the transition itself is always driven so the surface follows.
   const handleRetry = useCallback(() => {
     const needsReload = !!loadError || !loadedOnceRef.current
     setLoadError(null)
     setRetryCount(0)
-    if (needsReload) {
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
+    if (needsReload && webviewRef.current) {
       setIsLoading(true)
-      const webview = webviewRef.current
-      if (webview) {
-        webview.reload()
-        return
-      }
+      webviewRef.current.reload()
     }
     if (navigator.onLine) {
       goOnline()

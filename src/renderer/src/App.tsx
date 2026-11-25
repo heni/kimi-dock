@@ -75,6 +75,9 @@ function App(): React.JSX.Element {
   const [currentConversation, setCurrentConversation] = useState<Conversation | null>(null)
   const [isNetworkOffline, setIsNetworkOffline] = useState(!navigator.onLine)
   const [forceOffline, setForceOffline] = useState(false)
+  // The forced-offline flag arrives asynchronously; consumers that must not
+  // act on a not-yet-known flag (the lazy webview mount) wait for this.
+  const [settingsLoaded, setSettingsLoaded] = useState(false)
   const [hasSession, setHasSession] = useState(false)
   // Three surfaces in the main area: webview / offline chat (both inside
   // KimiWebView) / artifact editor. The editor never unmounts the webview —
@@ -126,8 +129,11 @@ function App(): React.JSX.Element {
     // any settings save (Settings modal, title bar toggle)
     window.api
       ?.getSettings?.()
-      .then((settings) => setForceOffline(!!settings?.forceOfflineMode))
-      .catch(console.error)
+      .then((settings) => {
+        setForceOffline(!!settings?.forceOfflineMode)
+        setSettingsLoaded(true)
+      })
+      .catch(() => setSettingsLoaded(true))
     const unsubscribeSettingsChanged = window.api?.onSettingsChanged?.((settings) => {
       setForceOffline(!!settings?.forceOfflineMode)
     })
@@ -208,6 +214,7 @@ function App(): React.JSX.Element {
               isOffline={isOffline}
               forceOffline={forceOffline}
               hasSession={hasSession}
+              settingsReady={settingsLoaded}
               onAuthRequired={() => setIsSettingsOpen(true)}
               onOpenArtifacts={handleOpenArtifacts}
               runSkillArmed={runSkillArmed}
