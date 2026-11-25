@@ -58,3 +58,46 @@ test('subscribers fire on mutations, not on no-ops', () => {
   clearDraft('t4', 'b.md')
   assert.equal(calls, total) // unsubscribed
 })
+
+test('saveAllDrafts: saves only the given chat, clears saved, keeps failed', async () => {
+  const writes = []
+  globalThis.window = {
+    api: {
+      fsWrite: async (path, content) => {
+        writes.push([path, content])
+        return path.includes('bad') ? { success: false, error: 'nope' } : { success: true }
+      }
+    }
+  }
+  const { saveAllDrafts } = await import('../.tmp/unit-build/renderer/src/utils/draftStore.js')
+  setDraft('t5', 'ok.md', 'v1', 'd')
+  setDraft('t5', 'bad.md', 'v2', 'd')
+  setDraft('t6', 'other.md', 'v3', 'd')
+  const { saved, failed } = await saveAllDrafts('t5')
+  assert.equal(saved, 1)
+  assert.equal(failed, 1)
+  assert.equal(hasDraft('t5', 'ok.md'), false, 'saved draft clears')
+  assert.equal(hasDraft('t5', 'bad.md'), true, 'failed draft kept')
+  assert.equal(hasDraft('t6', 'other.md'), true, 'other chat untouched')
+  assert.ok(
+    writes.every(([p]) => p.startsWith('t5/')),
+    'writes scoped to the chat'
+  )
+  clearDraft('t5', 'bad.md')
+  clearDraft('t6', 'other.md')
+  delete globalThis.window
+})
+
+test('resolveSave: raced keystroke survives, re-based onto disk', async () => {
+  const { resolveSave } = await import('../.tmp/unit-build/renderer/src/utils/draftStore.js')
+  setDraft('t7', 'a.md', 'written', 'disk0')
+  // A keystroke lands while the write is in flight.
+  setDraft('t7', 'a.md', 'written+more', 'disk0')
+  resolveSave('t7', 'a.md', 'written')
+  assert.deepEqual(getDraft('t7', 'a.md'), { content: 'written+more', base: 'written' })
+  // No race: the entry clears.
+  setDraft('t7', 'b.md', 'x', 'y')
+  resolveSave('t7', 'b.md', 'x')
+  assert.equal(hasDraft('t7', 'b.md'), false)
+  clearDraft('t7', 'a.md')
+})

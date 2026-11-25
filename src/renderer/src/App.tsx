@@ -1,4 +1,4 @@
-import { Component, ReactNode, useState, useEffect, useCallback } from 'react'
+import { Component, ReactNode, useState, useEffect, useCallback, useRef } from 'react'
 import KimiWebView from './components/KimiWebView'
 import TitleBar from './components/TitleBar'
 import Settings from './components/Settings'
@@ -6,7 +6,7 @@ import HelpModal from './components/HelpModal'
 import ConversationSidebar from './components/ConversationSidebar'
 import EditorView from './components/EditorView'
 import { Conversation, offlineManager } from './utils/offlineManager'
-import { subscribeDrafts, dirtyCount, saveAllDrafts } from './utils/draftStore'
+import { subscribeDrafts, dirtyCount, saveAllDrafts, clearAllDrafts } from './utils/draftStore'
 
 // Error Boundary for catching React errors
 class ErrorBoundary extends Component<
@@ -79,6 +79,7 @@ function App(): React.JSX.Element {
   // The forced-offline flag arrives asynchronously; consumers that must not
   // act on a not-yet-known flag (the lazy webview mount) wait for this.
   const [settingsLoaded, setSettingsLoaded] = useState(false)
+  const workspaceRootRef = useRef<string | null>(null)
   const [hasSession, setHasSession] = useState(false)
   // Three surfaces in the main area: webview / offline chat (both inside
   // KimiWebView) / artifact editor. The editor never unmounts the webview —
@@ -136,16 +137,24 @@ function App(): React.JSX.Element {
     window.addEventListener('offline', handleOffline)
 
     // Force-offline flag (settings.json): initial load + live updates from
-    // any settings save (Settings modal, title bar toggle)
+    // any settings save (Settings modal, title bar toggle). A workspace-root
+    // change invalidates every draft (they belong to the old root's chat
+    // dirs), so the store is cleared.
     window.api
       ?.getSettings?.()
       .then((settings) => {
         setForceOffline(!!settings?.forceOfflineMode)
+        workspaceRootRef.current = settings?.workspaceRoot ?? null
         setSettingsLoaded(true)
       })
       .catch(() => setSettingsLoaded(true))
     const unsubscribeSettingsChanged = window.api?.onSettingsChanged?.((settings) => {
       setForceOffline(!!settings?.forceOfflineMode)
+      const nextRoot = (settings as { workspaceRoot?: string })?.workspaceRoot ?? null
+      if (workspaceRootRef.current !== null && nextRoot !== workspaceRootRef.current) {
+        clearAllDrafts()
+      }
+      workspaceRootRef.current = nextRoot
     })
 
     return () => {
@@ -165,6 +174,16 @@ function App(): React.JSX.Element {
     push()
     return subscribeDrafts(push)
   }, [])
+
+  // Esc closes the draft guard, like every other dialog.
+  useEffect(() => {
+    if (!draftGuard) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') setDraftGuard(null)
+    }
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [draftGuard])
 
   const handleSelectConversation = useCallback((conversation: Conversation) => {
     setCurrentConversation(conversation)
@@ -290,6 +309,7 @@ function App(): React.JSX.Element {
                 onClose={() => setSurface('chat')}
                 skillArmed={runSkillArmed}
                 onToggleSkill={() => setRunSkillArmed((armed) => !armed)}
+                onChatSelected={setEditorChatId}
               />
             </div>
           )}

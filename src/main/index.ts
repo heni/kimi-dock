@@ -578,7 +578,9 @@ function createTray() {
     {
       label: 'Quit',
       click: () => {
-        isQuiting = true
+        // No isQuiting pre-set: app.quit closes the window, and the close
+        // handler's unsaved-drafts gate must get its say first. It sets
+        // isQuiting itself when the quit is confirmed.
         app.quit()
       }
     }
@@ -1230,7 +1232,9 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
+// will-quit, not before-quit: a quit aborted by the unsaved-drafts dialog
+// must not kill the running processes.
+app.on('will-quit', () => {
   stopAllProcesses()
 })
 

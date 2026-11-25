@@ -11,10 +11,11 @@ export interface Draft {
   base: string // last known disk content — the dirty baseline
 }
 
-const drafts = new Map<string, Draft>() // key: `${chatId} ${path}`
+const drafts = new Map<string, Draft>() // key: `${chatId}${path}`
 const listeners = new Set<() => void>()
 
-const key = (chatId: string, path: string): string => `${chatId} ${path}`
+// " " separators: chat dir names are user-visible and may contain spaces.
+const key = (chatId: string, path: string): string => `${chatId}${path}`
 
 function notify(): void {
   for (const fn of listeners) fn()
@@ -54,7 +55,7 @@ export function hasDraft(chatId: string, path: string): boolean {
 }
 
 export function dirtyPaths(chatId: string): string[] {
-  const prefix = `${chatId} `
+  const prefix = `${chatId}`
   const out: string[] = []
   for (const k of drafts.keys()) {
     if (k.startsWith(prefix)) out.push(k.slice(prefix.length))
@@ -64,7 +65,7 @@ export function dirtyPaths(chatId: string): string[] {
 
 export function dirtyCount(chatId?: string): number {
   if (chatId === undefined) return drafts.size
-  const prefix = `${chatId} `
+  const prefix = `${chatId}`
   let count = 0
   for (const k of drafts.keys()) {
     if (k.startsWith(prefix)) count += 1
@@ -72,11 +73,35 @@ export function dirtyCount(chatId?: string): number {
   return count
 }
 
+// After a successful write of `written`: a draft that did not change
+// during the write clears; one that DID (a keystroke raced the IPC
+// round-trip) survives, re-based onto what is now on disk.
+export function resolveSave(chatId: string, path: string, written: string): void {
+  const k = key(chatId, path)
+  const current = drafts.get(k)
+  if (!current) return
+  if (current.content === written) {
+    drafts.delete(k)
+  } else {
+    drafts.set(k, { content: current.content, base: written })
+  }
+  notify()
+}
+
+// Workspace root changed: drafts belong to the old root's chat dirs and
+// must not contaminate same-named chats in the new one.
+export function clearAllDrafts(): void {
+  if (drafts.size === 0) return
+  drafts.clear()
+  notify()
+}
+
 // Save every dirty draft of ONE chat (Ctrl+K S semantics: artifacts of
-// other chats are never touched). Entries clear on successful writes;
-// failures keep their drafts and are reported by count.
+// other chats are never touched). Entries clear on successful writes
+// (keystrokes racing the write survive, re-based); failures keep their
+// drafts and are reported by count.
 export async function saveAllDrafts(chatId: string): Promise<{ saved: number; failed: number }> {
-  const prefix = `${chatId} `
+  const prefix = `${chatId}`
   let saved = 0
   let failed = 0
   for (const [k, draft] of [...drafts.entries()]) {
@@ -84,12 +109,11 @@ export async function saveAllDrafts(chatId: string): Promise<{ saved: number; fa
     const path = k.slice(prefix.length)
     const result = await window.api?.fsWrite(`${chatId}/${path}`, draft.content)
     if (result?.success) {
-      drafts.delete(k)
+      resolveSave(chatId, path, draft.content)
       saved += 1
     } else {
       failed += 1
     }
   }
-  if (saved > 0) notify()
   return { saved, failed }
 }

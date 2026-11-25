@@ -6,10 +6,9 @@ import { offlineManager } from '../utils/offlineManager'
 import {
   setDraft,
   getDraft,
-  clearDraft,
   hasDraft,
-  dirtyPaths,
   dirtyCount,
+  resolveSave,
   saveAllDrafts
 } from '../utils/draftStore'
 import '../assets/EditorView.css'
@@ -20,6 +19,9 @@ interface EditorViewProps {
   onClose: () => void
   skillArmed: boolean
   onToggleSkill: () => void
+  // Picker selections are reported up so App's chat-switch draft guard
+  // knows which chat the editor is on.
+  onChatSelected?: (chatId: string) => void
 }
 
 interface ArtifactFile {
@@ -39,7 +41,8 @@ export default function EditorView({
   active,
   onClose,
   skillArmed,
-  onToggleSkill
+  onToggleSkill,
+  onChatSelected
 }: EditorViewProps): React.JSX.Element {
   const [activeChatId, setActiveChatId] = useState<string | null>(chatId)
   const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'unset'>('loading')
@@ -165,10 +168,12 @@ export default function EditorView({
 
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
-    const result = await window.api?.fsWrite(`${activeChatId}/${currentFile}`, fileContent)
+    const written = fileContent
+    const result = await window.api?.fsWrite(`${activeChatId}/${currentFile}`, written)
     if (result?.success) {
-      setSavedContent(fileContent)
-      clearDraft(activeChatId, currentFile)
+      setSavedContent(written)
+      // A keystroke that raced the write survives, re-based onto disk.
+      resolveSave(activeChatId, currentFile, written)
       setError(null)
       return true
     }
@@ -177,12 +182,12 @@ export default function EditorView({
   }, [activeChatId, currentFile, fileContent])
 
   // Ctrl+K S: save every dirty draft of THIS chat (other chats are never
-  // touched). Failures keep their drafts and are reported.
+  // touched). Failures keep their drafts and are reported; the current
+  // file's baseline advances only if its own write landed.
   const handleSaveAll = useCallback(async (): Promise<void> => {
     if (!activeChatId) return
-    const dirtyBefore = dirtyPaths(activeChatId)
     const { failed } = await saveAllDrafts(activeChatId)
-    if (currentFile && dirtyBefore.includes(currentFile)) {
+    if (currentFile && !hasDraft(activeChatId, currentFile)) {
       setSavedContent(fileContent)
     }
     setError(failed > 0 ? `Failed to save ${failed} draft${failed === 1 ? '' : 's'}` : null)
@@ -193,6 +198,12 @@ export default function EditorView({
     if (!name || !activeChatId) return
     if (name.startsWith('/') || name.split('/').includes('..')) {
       setError('Invalid file name')
+      return
+    }
+    // fsWrite truncates: creating over an existing artifact would silently
+    // destroy it (and orphan its draft).
+    if (files.some((file) => file.path === name)) {
+      setError('A file with this name already exists')
       return
     }
     const result = await window.api?.fsWrite(`${activeChatId}/${name}`, '')
@@ -244,8 +255,8 @@ export default function EditorView({
       }
       // Ctrl+Tab / Ctrl+Shift+Tab: cycle the chat's artifacts sequentially
       // with wrap-around (no tabs/MRU here — the honest analog of VS Code's
-      // Ctrl+PageUp/Down). Routes through openFile, so the unsaved-changes
-      // confirm protects cycling exactly as it protects clicking.
+      // Ctrl+PageUp/Down). Switching is loss-free: openFile restores drafts
+      // from the store, so cycling never asks and never discards.
       if (event.ctrlKey && event.key === 'Tab') {
         event.preventDefault()
         if (files.length === 0) return
@@ -354,7 +365,12 @@ export default function EditorView({
                 <button
                   key={dir.id}
                   className="chat-dir-item"
-                  onClick={() => setActiveChatId(dir.id)}
+                  onClick={() => {
+                    setActiveChatId(dir.id)
+                    // Keep App's editorChatId in sync, or its chat-switch
+                    // draft guard cannot see this chat later.
+                    onChatSelected?.(dir.id)
+                  }}
                 >
                   <span className="chat-dir-title">{dir.title}</span>
                   <span className="chat-dir-id">{dir.id}</span>
