@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
 import { Conversation, offlineManager } from '../utils/offlineManager'
 import {
   appendUserMessage,
@@ -68,6 +68,10 @@ export default function KimiWebView({
   const webviewRef = useRef<WebviewTag | null>(null)
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
+  const messagesRef = useRef<HTMLDivElement | null>(null)
+  // Stick-to-bottom: new content auto-scrolls only while the user is at the
+  // bottom; someone scrolled up into history is never yanked down.
+  const stickToBottomRef = useRef(true)
   // The queue reads the stored record on every pass; this mirror only answers
   // "is the queue's conversation still the one on screen".
   const conversationRef = useRef<Conversation | null>(null)
@@ -409,8 +413,39 @@ export default function KimiWebView({
       ? sendError
       : null
 
+  const showOfflineView = isOffline || connectionStatus === 'offline'
+  const viewedConvId = activeConversation?.id ?? null
+  const lastMessageId = allMessages[allMessages.length - 1]?.id ?? null
+  const lastMessageRole = allMessages[allMessages.length - 1]?.role ?? null
+
+  // Opening a conversation — or returning to the offline view — lands on
+  // the latest message and re-arms stick-to-bottom. Layout effect: scroll
+  // happens before paint, so the list never flashes its top.
+  useLayoutEffect(() => {
+    stickToBottomRef.current = true
+    const el = messagesRef.current
+    if (el) el.scrollTop = el.scrollHeight
+  }, [viewedConvId, showOfflineView])
+
+  // Bring new content into view: always for the user's own just-sent
+  // message, otherwise only while stuck to the bottom. Replies arrive as
+  // single blocks (no streaming), so appends are the only list growth.
+  useLayoutEffect(() => {
+    const el = messagesRef.current
+    if (!el) return
+    if (stickToBottomRef.current || lastMessageRole === 'user') {
+      el.scrollTop = el.scrollHeight
+    }
+  }, [viewedConvId, showOfflineView, lastMessageId, lastMessageRole, queueBusyHere])
+
+  const handleMessagesScroll = (): void => {
+    const el = messagesRef.current
+    if (!el) return
+    stickToBottomRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < 100
+  }
+
   // Offline view
-  if (isOffline || connectionStatus === 'offline') {
+  if (showOfflineView) {
     return (
       <div className="webview-container">
         <div className="offline-chat-view">
@@ -445,7 +480,7 @@ export default function KimiWebView({
             </div>
           </div>
 
-          <div className="messages-container">
+          <div className="messages-container" ref={messagesRef} onScroll={handleMessagesScroll}>
             {allMessages.length === 0 ? (
               <div className="empty-chat">
                 <div className="empty-icon">💬</div>

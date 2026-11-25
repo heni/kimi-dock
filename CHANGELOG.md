@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.1] - 2026-11-25
+
+### Fixed
+
+- **Offline chat auto-scroll** — the conversation now follows the exchange:
+  opening a chat lands on the latest message, sending a message scrolls it
+  into view, and replies and the typing indicator keep the list pinned to
+  the bottom. Scrolling up into history disengages the pin, so an arriving
+  reply no longer yanks the view; scrolling back to the bottom re-engages
+  it.
+
 ## [3.5.0] - 2026-11-24
 
 ### Added
