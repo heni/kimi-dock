@@ -6,7 +6,7 @@
 
 <p align="center">
   <b>Desktop dock for <a href="https://kimi.ai">Kimi AI</a> on a Kimi Code Plan subscription</b><br>
-  OAuth device-flow login · Sandboxed webview · arm64 deb with AppArmor
+  OAuth device-flow login · Sandboxed webview · Linux deb with AppArmor
 </p>
 
 <p align="center">
@@ -75,27 +75,32 @@
 
 ## Installation
 
-Kimi Dock targets **Linux** and ships as a `.deb`. Build it from source:
+Kimi Dock targets **Linux** and ships as a `.deb`. The package is
+**architecture-specific** — it bundles a native Electron binary — so use
+the package matching your machine's architecture (`dpkg
+--print-architecture` prints `amd64` on x86-64, `arm64` on ARM).
+
+Build from source:
 
 ```bash
 git clone https://github.com/heni/kimi-dock.git
 cd kimi-dock
 npm ci
-npm run build:linux        # → dist/kimi-dock_<version>_arm64.deb (host arch)
-sudo apt install ./dist/kimi-dock_*_arm64.deb
+npm run build:linux        # builds for the host machine's architecture
+sudo apt install ./dist/kimi-dock_*_"$(dpkg --print-architecture)".deb
 ```
 
-The package is **architecture-specific**: it bundles a native Electron
-binary, so an arm64 `.deb` does not run on x86_64. To build for another
-architecture from any Linux host, pass it to electron-builder:
+To build for a _different_ architecture than the host's, pass the target
+to electron-builder — `--x64` produces `..._amd64.deb`, `--arm64`
+produces `..._arm64.deb`:
 
 ```bash
-npm run build && npx electron-builder --linux deb --x64   # → dist/kimi-dock_<version>_amd64.deb
+npm run build && npx electron-builder --linux deb --x64
 ```
 
-The app has no native npm dependencies, so the cross-build needs no extra
-toolchain. Note that an x64 package built on an arm64 host cannot be
-launched there — verify it on the target machine.
+The app has no native npm dependencies, so cross-building needs no extra
+toolchain — but a package built for another architecture cannot be
+launched on the build host; verify it on the target machine.
 
 The package's postinst installs the AppArmor profile
 (`/etc/apparmor.d/kimi-dock`) and reloads it, so the Chromium sandbox works
@@ -118,9 +123,9 @@ history, or everything — the OAuth session is cleared with "all data".
 
 ## Keyboard shortcuts
 
-| Shortcut | Action |
-|----------|--------|
-| `Ctrl + ,` | Open Settings |
+| Shortcut           | Action                      |
+| ------------------ | --------------------------- |
+| `Ctrl + ,`         | Open Settings               |
 | `Ctrl + Shift + S` | Toggle conversation sidebar |
 
 ## Development
@@ -164,7 +169,7 @@ proxy accepts no path other than `GET`/`POST /chat/completions`; files under
 Kimi Dock is a fork of [Virusilvester/kimi-desktop](https://github.com/Virusilvester/kimi-desktop)
 (MIT). The fork replaces the upstream Moonshot API-key mode with Kimi Code
 Plan OAuth, hardens the renderer-to-main bridge, adds the clipboard bridge,
-and packages for Ubuntu arm64 with AppArmor. Upstream remains the base for
+and packages for Ubuntu as a `.deb` with AppArmor. Upstream remains the base for
 webview-wrapper behavior; non-fork-specific fixes are intended to be
 contributed back. Pre-3.0.0 history is upstream's — see
 [CHANGELOG](./CHANGELOG.md).
