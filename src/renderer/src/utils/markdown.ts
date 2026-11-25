@@ -17,6 +17,6 @@ export function handleMarkdownLinkClick(event: MouseEvent): void {
   if (anchor) {
     event.preventDefault()
     const href = anchor.getAttribute('href')
-    if (href && /^(https?:|mailto:)/.test(href)) window.open(href)
+    if (href && /^(https?:|mailto:)/i.test(href)) window.open(href)
   }
 }
