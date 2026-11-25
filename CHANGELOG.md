@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.5] - 2026-11-25
+
+### Fixed
+
+- **Assistant answers can be copied** — every assistant message in the
+  offline chat has a copy button (next to the timestamp, no hover needed);
+  it writes the raw markdown source through the clipboard bridge, with a
+  ✓/✗ acknowledgement on the button. Previously the rendered answer could
+  not be copied at all.
+
 ## [3.5.4] - 2026-11-25
 
 ### Fixed
