@@ -177,6 +177,9 @@ let isQuiting = false
 // Mirror of the renderer's draft-store dirty count (drafts-set-count);
 // the close handler below gates the app exit on it.
 let unsavedDraftCount = 0
+// One exit question at a time: a close request arriving while the dialog
+// is up must not stack another one.
+let exitDialogInFlight = false
 let saveWindowStateTimer: NodeJS.Timeout | null = null
 
 // Default window state
@@ -479,12 +482,19 @@ function createWindow(): void {
       return
     }
     // Unsaved editor drafts live only in the renderer's memory — exiting
-    // destroys them, so the exit asks first.
+    // destroys them, so the exit asks first: cancel the close, ask, and on
+    // "Quit" re-issue the close with the force flag. The dialog is
+    // parentless: a window-modal dialog on a close-prevented window was
+    // the suspected trigger of GNOME's "not responding" banner (3.5.9).
     if (!isQuiting && unsavedDraftCount > 0 && mainWindow) {
       event.preventDefault()
+      // A second close request while the question is up (double X-click,
+      // tray Quit) must not stack a second dialog.
+      if (exitDialogInFlight) return
+      exitDialogInFlight = true
       const count = unsavedDraftCount
       void dialog
-        .showMessageBox(mainWindow, {
+        .showMessageBox({
           type: 'warning',
           buttons: ['Quit', 'Keep editing'],
           defaultId: 1,
@@ -495,12 +505,18 @@ function createWindow(): void {
         })
         .then(({ response }) => {
           if (response === 0) {
+            // Quit anyway: re-issue the close with the force flag.
             isQuiting = true
-            mainWindow?.close()
+            if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
           } else {
             // Aborted quit: a scheduled restart must not survive it.
             relaunchOnQuit = false
           }
+        })
+        // finally, not then: a rejected dialog promise must not wedge the
+        // in-flight flag and silently swallow every future close request.
+        .finally(() => {
+          exitDialogInFlight = false
         })
       return
     }

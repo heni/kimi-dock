@@ -5,6 +5,19 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.10] - 2026-11-25
+
+### Fixed
+
+- **The exit warning no longer triggers GNOME's "not responding" banner** —
+  the drafts question was a window-modal dialog attached to the very
+  window whose close had just been cancelled — the suspected trigger of
+  GNOME's force-quit timer. The dialog is now parentless (and single: a
+  repeated close request while it is up does not stack another), and
+  "Quit" re-issues the close with a force flag. (If the banner ever
+  resurfaces, the documented fallback is hiding the window while the
+  question is up.)
+
 ## [3.5.9] - 2026-11-25
 
 ### Changed
