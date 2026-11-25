@@ -303,7 +303,8 @@ export default function EditorView({
       if (chordRef.current && event.key === 'v') {
         event.preventDefault()
         chordRef.current = false
-        setViewMode('split')
+        // A mode, not a tab: toggle like its sibling Ctrl+Shift+V.
+        setViewMode((mode) => (mode === 'split' ? 'edit' : 'split'))
       }
     }
     window.addEventListener('keydown', handleKeyDown)

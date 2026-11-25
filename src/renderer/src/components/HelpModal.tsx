@@ -15,7 +15,7 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: 'Ctrl+Shift+Tab', action: 'Previous artifact (artifact editor)' },
   { keys: 'Ctrl+K S', action: 'Save all drafts of this chat (artifact editor)' },
   { keys: 'Ctrl+Shift+V', action: 'Markdown: toggle edit / preview' },
-  { keys: 'Ctrl+K V', action: 'Markdown: open the split view' },
+  { keys: 'Ctrl+K V', action: 'Markdown: toggle the split view' },
   { keys: 'F1', action: 'Open this help' },
   { keys: 'Esc', action: 'Close this help' }
 ]
