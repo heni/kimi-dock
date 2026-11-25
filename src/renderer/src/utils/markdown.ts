@@ -10,12 +10,13 @@ export const md = new MarkdownIt({ html: false, linkify: true })
 md.use(katexPlugin, { throwOnError: false })
 
 // Rendered links open in the system browser (routed by the main window's
-// window.open handler), never inside the app window.
+// window.open handler), never inside the app window. mailto: rides the same
+// route — main's open handler passes it to the system mail client.
 export function handleMarkdownLinkClick(event: MouseEvent): void {
   const anchor = (event.target as HTMLElement).closest('a')
   if (anchor) {
     event.preventDefault()
     const href = anchor.getAttribute('href')
-    if (href && /^https?:\/\//.test(href)) window.open(href)
+    if (href && /^(https?:|mailto:)/.test(href)) window.open(href)
   }
 }

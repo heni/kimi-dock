@@ -294,6 +294,12 @@
   color: #ddd;
 }
 
+.markdown-preview .katex-display {
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 0;
+}
+
 .markdown-preview h1,
 .markdown-preview h2,
 .markdown-preview h3 {

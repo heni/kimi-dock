@@ -50,9 +50,20 @@ test('http links render as anchors (click routing is the component job)', () => 
 })
 
 test('a broken formula does not throw and does not kill the message', () => {
+  // Integration-level guarantee: whatever the plugin does with a broken
+  // formula internally, the surrounding message must still render.
   let html = ''
   assert.doesNotThrow(() => {
     html = md.render('до\n\n$$\\frac{1}{$$\n\nпосле')
   })
   assert.match(html, /после/)
+})
+
+test('KaTeX trust stays false: \\href in math must not produce a link', () => {
+  // KaTeX refuses the command and renders the source as red error text;
+  // MathML <annotation> legitimately contains the raw source, so assert on
+  // a real anchor tag, not on the substring '<a'.
+  const html = md.render('$$\\href{javascript:alert(1)}{x}$$')
+  assert.ok(!/<a[\s>]/.test(html), 'trust:false must refuse \\href links')
+  assert.ok(!/href="javascript:/.test(html), 'no javascript: href may survive')
 })
