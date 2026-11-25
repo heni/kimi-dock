@@ -8,6 +8,7 @@
  */
 import { _electron as electron } from 'playwright'
 import fs from 'node:fs'
+import path from 'node:path'
 
 const SHOTS = '/tmp/kimi-desktop-e2e'
 fs.mkdirSync(SHOTS, { recursive: true })
@@ -18,6 +19,15 @@ const app = await electron.launch({
   chromiumSandbox: !noSandbox
 })
 
+// Live-profile safety: the run presets forceOfflineMode=false when the
+// profile was saved forced (the webview steps need it), and step 8 presets
+// forceOfflineMode=true for the offline-boot relaunch. The original
+// settings file bytes are restored in the outermost finally, whatever
+// fails in between — a mid-run crash must not leave the profile altered.
+let app1Closed = false
+let settingsFile = null
+let originalSettingsRaw = null
+
 try {
   const window = await app.firstWindow()
 
@@ -25,6 +35,22 @@ try {
   await window.waitForSelector('.titlebar', { timeout: 15000 })
   const title = await window.textContent('.title .version')
   console.log('[e2e] Window OK, version badge:', title?.trim() || '(none)')
+
+  const userDataPath = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
+  settingsFile = path.join(userDataPath, 'settings.json')
+  originalSettingsRaw = fs.existsSync(settingsFile) ? fs.readFileSync(settingsFile, 'utf-8') : null
+  const savedSettings = originalSettingsRaw ? JSON.parse(originalSettingsRaw) : {}
+
+  // Steps 2+ expect the webview surface: leave forced-offline mode if the
+  // profile was saved with it (restored by the outer finally).
+  if (savedSettings.forceOfflineMode) {
+    await window.evaluate(
+      (s) => window.api.saveSettings({ ...s, forceOfflineMode: false }),
+      savedSettings
+    )
+    await window.waitForSelector('webview.kimi-webview', { timeout: 15000 })
+    console.log('[e2e] Profile had forceOfflineMode=true — preset to false for the run')
+  }
 
   // 2) OAuth session from userData (migrated from upstream ~/.config/kimi-desktop)
   const oauth = await window.evaluate(() => window.api.oauthStatus())
@@ -163,7 +189,43 @@ try {
   await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
   console.log('[e2e] Editor surface hidden, webview restored')
 
+  await app.close()
+  app1Closed = true
+
+  // 8) Offline boot → online transition. Relaunch with forceOfflineMode
+  // preset in the settings file, flip the title-bar toggle, and require the
+  // loading overlay to DETACH — regression for the transition hanging on
+  // the spinner when the webview first mounts after an offline boot (its
+  // load listeners never attached, so did-finish-load never cleared
+  // isLoading). The preset lives inside the outer try: whatever fails from
+  // here on, the finally restores the original settings bytes.
+  fs.writeFileSync(
+    settingsFile,
+    JSON.stringify({ ...savedSettings, forceOfflineMode: true }, null, 2)
+  )
+  const app2 = await electron.launch({ args: ['.'], chromiumSandbox: !noSandbox })
+  try {
+    const window2 = await app2.firstWindow()
+    await window2.waitForSelector('.offline-chat-view', { timeout: 15000 })
+    console.log('[e2e] Offline boot: offline chat view shown')
+    await window2.click('.force-offline-toggle')
+    await window2.waitForSelector('webview.kimi-webview', { timeout: 15000 })
+    await window2.waitForSelector('.loading-overlay', { state: 'detached', timeout: 30000 })
+    console.log('[e2e] Offline boot → online: webview loaded, loading overlay detached')
+  } finally {
+    await app2.close()
+  }
+
   console.log('[e2e] PASS')
 } finally {
-  await app.close()
+  if (!app1Closed) await app.close()
+  if (settingsFile) {
+    if (originalSettingsRaw !== null) {
+      fs.writeFileSync(settingsFile, originalSettingsRaw)
+    } else {
+      // No settings.json existed before the run: step 8 created one — remove
+      // it rather than leave a forced-offline file the profile never had.
+      fs.rmSync(settingsFile, { force: true })
+    }
+  }
 }

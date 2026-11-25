@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.3] - 2026-11-25
+
+### Fixed
+
+- **Offline→online transition no longer hangs on the loading spinner** —
+  when the app booted into offline mode, the webview's load listeners were
+  never attached (the listener effect ran while no webview existed and did
+  not re-run when one mounted), so `did-finish-load` never cleared the
+  loading overlay and the retry-on-fail logic was dead. The effect now
+  re-runs when the webview (re)mounts. The transition also shows the
+  "Reconnecting..." overlay while the webview loads instead of a blank
+  area, and "Try Reconnecting" drives the transition immediately instead
+  of waiting for the 5-second connectivity poll.
+- **e2e** — new step 8 regression-covers the boot-offline→online path
+  (RED on the pre-fix code: the overlay never detached); the harness now
+  presets `forceOfflineMode=false` itself when the profile was saved
+  forced, and restores the original settings afterwards.
+
 ## [3.5.2] - 2026-11-25
 
 ### Fixed
