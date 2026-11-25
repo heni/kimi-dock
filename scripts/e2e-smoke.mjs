@@ -63,7 +63,7 @@ try {
     document.querySelector('webview')?.getAttribute('src')
   )
   console.log('[e2e] WebView src:', webviewSrc)
-  if (webviewSrc !== 'https://kimi.ai') throw new Error(`Unexpected webview src: ${webviewSrc}`)
+  if (webviewSrc !== 'https://www.kimi.ai') throw new Error(`Unexpected webview src: ${webviewSrc}`)
 
   await window.screenshot({ path: `${SHOTS}/01-main.png` })
 
@@ -208,6 +208,14 @@ try {
     const window2 = await app2.firstWindow()
     await window2.waitForSelector('.offline-chat-view', { timeout: 15000 })
     console.log('[e2e] Offline boot: offline chat view shown')
+    // Lazy mount (3.5.7): a forced-offline boot must render NO webview —
+    // the forced flag arrives async, and an early mount would waste a load.
+    const webviewCountBefore = await window2.evaluate(
+      () => document.querySelectorAll('webview').length
+    )
+    if (webviewCountBefore !== 0) {
+      throw new Error(`Expected no webview before the transition, found ${webviewCountBefore}`)
+    }
     await window2.click('.force-offline-toggle')
     await window2.waitForSelector('webview.kimi-webview', { timeout: 15000 })
     await window2.waitForSelector('.loading-overlay', { state: 'detached', timeout: 30000 })

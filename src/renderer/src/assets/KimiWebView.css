@@ -11,14 +11,14 @@
   border: none;
 }
 
-/* Loading Overlay */
+/* Loading overlay: positioning only — the visible content is the
+   LoadingSkeleton (light, in the shape of the kimi.ai greeting). */
 .loading-overlay {
   position: absolute;
   top: 0;
   left: 0;
   right: 0;
   bottom: 0;
-  background: #111;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -26,56 +26,15 @@
   z-index: 100;
 }
 
-.loading-spinner {
-  position: relative;
-  width: 60px;
-  height: 60px;
-}
-
-.spinner-ring {
+/* Keep-mounted webview surface: absolute so the CSS-hidden surface never
+   affects the offline view's layout. */
+.webview-surface {
   position: absolute;
-  width: 100%;
-  height: 100%;
-  border: 3px solid transparent;
-  border-top-color: #4caf50;
-  border-radius: 50%;
-  animation: spin 1s linear infinite;
-}
-
-.spinner-ring:nth-child(2) {
-  width: 80%;
-  height: 80%;
-  top: 10%;
-  left: 10%;
-  border-top-color: #8bc34a;
-  animation-duration: 1.5s;
-}
-
-.spinner-ring:nth-child(3) {
-  width: 60%;
-  height: 60%;
-  top: 20%;
-  left: 20%;
-  border-top-color: #cddc39;
-  animation-duration: 2s;
-}
-
-@keyframes spin {
-  to {
-    transform: rotate(360deg);
-  }
-}
-
-.loading-text {
-  color: #fff;
-  margin-top: 20px;
-  font-size: 14px;
-}
-
-.loading-retry {
-  color: #888;
-  font-size: 12px;
-  margin-top: 8px;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  flex-direction: column;
 }
 
 /* Offline Chat View */
@@ -548,8 +507,11 @@
 
 /* Error Container */
 .error-container {
-  width: 100%;
-  height: 100%;
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
   display: flex;
   align-items: center;
   justify-content: center;

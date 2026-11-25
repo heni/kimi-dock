@@ -8,6 +8,7 @@ import {
   toApiMessages
 } from '../utils/chatFlow'
 import RUN_JSON_SKILL from '../../../../resources/skills/run-json/SKILL.md?raw'
+import LoadingSkeleton from './LoadingSkeleton'
 import '../assets/KimiWebView.css'
 
 type ConnectionStatus = 'online' | 'offline' | 'checking' | 'error'
@@ -35,6 +36,7 @@ interface KimiWebViewProps {
   isOffline: boolean
   forceOffline: boolean
   hasSession: boolean
+  settingsReady: boolean
   onAuthRequired: () => void
   onOpenArtifacts: (conversation: Conversation) => void
   runSkillArmed: boolean
@@ -46,6 +48,7 @@ export default function KimiWebView({
   isOffline,
   forceOffline,
   hasSession,
+  settingsReady,
   onAuthRequired,
   onOpenArtifacts,
   runSkillArmed,
@@ -79,6 +82,17 @@ export default function KimiWebView({
     webviewRef.current = el
     setWebviewEl(el)
   }, [])
+  // Keep-mounted (docs/ui-design.md §6): once the webview first mounts, the
+  // offline view only CSS-hides it — repeat offline↔online transitions
+  // return to the live SPA instantly, without a reload. It mounts lazily
+  // and only after the settings are known (the effect below): a boot into
+  // offline mode — network or forced — renders no webview until the first
+  // transition. isOffline alone cannot gate the first paint: the forced
+  // flag arrives asynchronously from settings.
+  const [webviewMounted, setWebviewMounted] = useState(false)
+  // Set on the first did-finish-load: a loaded SPA self-heals reconnects,
+  // so passive transitions stop showing loading states and reloading.
+  const loadedOnceRef = useRef(false)
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
@@ -140,13 +154,24 @@ export default function KimiWebView({
     return () => unsubscribe?.()
   }, [])
 
-  // Shared online transition: a brief 'checking' (the loading overlay reads
-  // "Reconnecting..."), then online. isLoading goes up here because the
-  // transition (re)mounts the webview; its did-finish-load clears the flag.
+  // Shared online transition: a brief 'checking', then online. A loaded SPA
+  // self-heals reconnects — repeat transitions are instant, nothing spins.
+  // A FAILED load (first or later) is wedged — the auto-retry only runs
+  // while navigator.onLine — so the transition re-drives it here, the
+  // single reload path for the online case.
   const goOnlineTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const goOnline = useCallback((): void => {
     setConnectionStatus('checking')
-    setIsLoading(true)
+    const webview = webviewRef.current
+    if (loadError && webview) {
+      setLoadError(null)
+      setRetryCount(0)
+      setIsLoading(true)
+      webview.reload()
+    } else if (!retryTimeoutRef.current) {
+      // No reload in flight: spin only while a first load is still to come.
+      setIsLoading(!loadedOnceRef.current)
+    }
     if (goOnlineTimeoutRef.current) clearTimeout(goOnlineTimeoutRef.current)
     goOnlineTimeoutRef.current = setTimeout(() => {
       goOnlineTimeoutRef.current = null
@@ -154,7 +179,7 @@ export default function KimiWebView({
       setLoadError(null)
       setRetryCount(0)
     }, 1000)
-  }, [])
+  }, [loadError])
 
   // Network status monitoring
   useEffect(() => {
@@ -189,6 +214,13 @@ export default function KimiWebView({
   }, [connectionStatus, goOnline])
 
   const showOfflineView = isOffline || connectionStatus === 'offline'
+
+  // First transition out of the offline view mounts the (lazy) webview;
+  // afterwards it stays mounted and only CSS-hidden. Gated on settingsReady:
+  // before the forced-offline flag arrives, showOfflineView is unreliable.
+  useEffect(() => {
+    if (settingsReady && !showOfflineView) setWebviewMounted(true)
+  }, [settingsReady, showOfflineView])
 
   // Serial send queue. Each pass reads the stored record fresh, sends the
   // full history (each message exactly once) and, on success, marks exactly
@@ -309,6 +341,12 @@ export default function KimiWebView({
     if (!webview) return
 
     const handleDidFinishLoad = (): void => {
+      loadedOnceRef.current = true
+      // A pending auto-retry must not reload the now-healthy page later.
+      if (retryTimeoutRef.current) {
+        clearTimeout(retryTimeoutRef.current)
+        retryTimeoutRef.current = null
+      }
       setIsLoading(false)
       setLoadError(null)
       setRetryCount(0)
@@ -355,7 +393,7 @@ export default function KimiWebView({
     const handleNavigate = (path: string): void => {
       const webview = webviewRef.current
       if (webview && path !== 'settings') {
-        const url = path.startsWith('http') ? path : `https://kimi.ai${path}`
+        const url = path.startsWith('http') ? path : `https://www.kimi.ai${path}`
         webview.src = url
       }
     }
@@ -372,17 +410,25 @@ export default function KimiWebView({
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
   }, [inputValue])
 
+  // "Try Reconnecting" (offline view) / "Reload Page" (error surface).
+  // Online, goOnline re-drives a failed load itself — the single reload
+  // path, so a click cannot double-reload. Offline, an explicit reload is
+  // the only honest feedback a click can give (it will fail and re-show
+  // the error surface).
   const handleRetry = useCallback(() => {
-    setLoadError(null)
-    setIsLoading(true)
+    if (retryTimeoutRef.current) {
+      clearTimeout(retryTimeoutRef.current)
+      retryTimeoutRef.current = null
+    }
     setRetryCount(0)
-    const webview = webviewRef.current
-    if (webview) {
-      webview.reload()
-    } else if (navigator.onLine) {
-      // Offline view: no webview to reload — drive the transition directly
-      // instead of waiting for the 5 s polling interval.
+    if (navigator.onLine) {
       goOnline()
+      return
+    }
+    setLoadError(null)
+    if (webviewRef.current) {
+      setIsLoading(true)
+      webviewRef.current.reload()
     }
   }, [goOnline])
 
@@ -508,216 +554,208 @@ export default function KimiWebView({
   }
 
   // Offline view
-  if (showOfflineView) {
-    return (
-      <div className="webview-container">
-        <div className="offline-chat-view">
-          <div className="offline-header">
-            <div className="header-left">
-              <h2>{activeConversation?.title || 'New Conversation'}</h2>
-              {allMessages.length > 0 && (
-                <span className="message-count">{allMessages.length} messages</span>
-              )}
-            </div>
-            <div className="offline-badges">
-              {runSkillArmed && (
-                <button
-                  className="skill-chip"
-                  onClick={onDisarmRunSkill}
-                  title="run.json skill attached to outgoing messages — click to detach"
-                >
-                  run.json skill ×
-                </button>
-              )}
-              {activeConversation && (
-                <button
-                  className="artifacts-btn"
-                  onClick={() => onOpenArtifacts(activeConversation)}
-                  title="Open this chat's artifacts in the editor"
-                >
-                  📁 Artifacts
-                </button>
-              )}
-              <span className="offline-badge">Offline Mode</span>
-              {hasSession && <span className="api-ready">Kimi Code Ready</span>}
-            </div>
-          </div>
-
-          <div className="messages-container" ref={messagesRef} onScroll={handleMessagesScroll}>
-            {allMessages.length === 0 ? (
-              <div className="empty-chat">
-                <div className="empty-icon">💬</div>
-                <p>No messages yet</p>
-                <p className="empty-subtitle">Type a message to start a conversation</p>
-              </div>
-            ) : (
-              allMessages.map((msg) => (
-                <div key={msg.id} className={`message ${msg.role}`}>
-                  <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
-                  <div className="message-content">
-                    {msg.role === 'assistant' ? (
-                      <ChatMarkdown content={msg.content} />
-                    ) : (
-                      <div className="message-text">{msg.content}</div>
-                    )}
-                    <div className="message-time">
-                      {new Date(msg.timestamp).toLocaleTimeString()}
-                      {msg.role === 'assistant' && (
-                        <button
-                          className="copy-btn"
-                          onClick={() => handleCopyMessage(msg)}
-                          title="Copy answer (markdown source)"
-                          aria-label={
-                            copyState?.id === msg.id
-                              ? copyState.ok
-                                ? 'Copied'
-                                : 'Copy failed'
-                              : 'Copy answer'
-                          }
-                        >
-                          {copyState?.id === msg.id ? (copyState.ok ? '✓' : '✗') : '⧉'}
-                        </button>
-                      )}
-                      {msg.role === 'user' && msg.syncStatus === 'pending' && (
-                        <span className="pending"> (queued)</span>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              ))
-            )}
-
-            {queueBusyHere && (
-              <div className="message assistant">
-                <div className="message-avatar">🤖</div>
-                <div className="message-content">
-                  <div className="typing-indicator">
-                    <span></span>
-                    <span></span>
-                    <span></span>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {visibleSendError && (
-            <div className="send-error">
-              <span>
-                ⚠️ {visibleSendError.message} Queued messages retry on the next send or reconnect.
-              </span>
-              <button className="send-error-dismiss" onClick={() => setSendError(null)}>
-                ×
-              </button>
-            </div>
+  const offlineView = showOfflineView ? (
+    <div className="offline-chat-view">
+      <div className="offline-header">
+        <div className="header-left">
+          <h2>{activeConversation?.title || 'New Conversation'}</h2>
+          {allMessages.length > 0 && (
+            <span className="message-count">{allMessages.length} messages</span>
           )}
-
-          <div className="input-area">
-            <textarea
-              ref={inputRef}
-              value={inputValue}
-              onChange={(e) => setInputValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                  e.preventDefault()
-                  void handleSendMessage()
-                }
-              }}
-              placeholder={
-                hasSession
-                  ? 'Type your message... (Shift+Enter for a new line)'
-                  : 'Log in with your Kimi account in settings to chat'
-              }
-              rows={1}
-            />
+        </div>
+        <div className="offline-badges">
+          {runSkillArmed && (
             <button
-              onClick={handleSendMessage}
-              disabled={!inputValue.trim() || !hasSession}
-              className="send-btn"
+              className="skill-chip"
+              onClick={onDisarmRunSkill}
+              title="run.json skill attached to outgoing messages — click to detach"
             >
-              {queueBusyHere ? '⏳' : '➤'}
+              run.json skill ×
             </button>
-          </div>
+          )}
+          {activeConversation && (
+            <button
+              className="artifacts-btn"
+              onClick={() => onOpenArtifacts(activeConversation)}
+              title="Open this chat's artifacts in the editor"
+            >
+              📁 Artifacts
+            </button>
+          )}
+          <span className="offline-badge">Offline Mode</span>
+          {hasSession && <span className="api-ready">Kimi Code Ready</span>}
+        </div>
+      </div>
 
-          <div className="offline-notice">
-            <p>
-              {forceOffline
-                ? 'Offline mode is forced — flip the title bar toggle (or Settings → Advanced) to return to the webview. Messages are still saved locally.'
-                : hasSession
-                  ? "You're in offline mode. Messages are saved locally and will persist."
-                  : 'Log in with your Kimi account (Settings → Kimi Account) to enable chat functionality.'}
-            </p>
-            <div className="notice-actions">
-              <button className="btn-secondary" onClick={handleNewConversation}>
-                📝 New Chat
-              </button>
-              {!forceOffline && (
-                <button className="btn-primary" onClick={handleRetry}>
-                  🔄 Try Reconnecting
-                </button>
-              )}
+      <div className="messages-container" ref={messagesRef} onScroll={handleMessagesScroll}>
+        {allMessages.length === 0 ? (
+          <div className="empty-chat">
+            <div className="empty-icon">💬</div>
+            <p>No messages yet</p>
+            <p className="empty-subtitle">Type a message to start a conversation</p>
+          </div>
+        ) : (
+          allMessages.map((msg) => (
+            <div key={msg.id} className={`message ${msg.role}`}>
+              <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
+              <div className="message-content">
+                {msg.role === 'assistant' ? (
+                  <ChatMarkdown content={msg.content} />
+                ) : (
+                  <div className="message-text">{msg.content}</div>
+                )}
+                <div className="message-time">
+                  {new Date(msg.timestamp).toLocaleTimeString()}
+                  {msg.role === 'assistant' && (
+                    <button
+                      className="copy-btn"
+                      onClick={() => handleCopyMessage(msg)}
+                      title="Copy answer (markdown source)"
+                      aria-label={
+                        copyState?.id === msg.id
+                          ? copyState.ok
+                            ? 'Copied'
+                            : 'Copy failed'
+                          : 'Copy answer'
+                      }
+                    >
+                      {copyState?.id === msg.id ? (copyState.ok ? '✓' : '✗') : '⧉'}
+                    </button>
+                  )}
+                  {msg.role === 'user' && msg.syncStatus === 'pending' && (
+                    <span className="pending"> (queued)</span>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))
+        )}
+
+        {queueBusyHere && (
+          <div className="message assistant">
+            <div className="message-avatar">🤖</div>
+            <div className="message-content">
+              <div className="typing-indicator">
+                <span></span>
+                <span></span>
+                <span></span>
+              </div>
             </div>
           </div>
-        </div>
+        )}
       </div>
-    )
-  }
 
-  // Error UI
-  if (loadError && !isLoading) {
-    return (
-      <div className="error-container">
-        <div className="error-content">
-          <div className="error-icon">⚠️</div>
-          <h2>Failed to Load</h2>
-          <p className="error-message">{loadError}</p>
-          {retryCount > 0 && <p className="retry-count">Retry attempt {retryCount}/3</p>}
-
-          <div className="error-actions">
-            <button className="btn-primary" onClick={handleRetry}>
-              Reload Page
-            </button>
-            <button className="btn-secondary" onClick={() => window.api?.restartApp?.()}>
-              Restart App
-            </button>
-          </div>
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div className="webview-container">
-      {isLoading && (
-        <div className="loading-overlay">
-          <div className="loading-spinner">
-            <div className="spinner-ring"></div>
-            <div className="spinner-ring"></div>
-            <div className="spinner-ring"></div>
-          </div>
-          <p className="loading-text">
-            {connectionStatus === 'checking' ? 'Reconnecting...' : 'Loading Kimi...'}
-          </p>
-          {retryCount > 0 && <p className="loading-retry">Attempt {retryCount + 1}</p>}
+      {visibleSendError && (
+        <div className="send-error">
+          <span>
+            ⚠️ {visibleSendError.message} Queued messages retry on the next send or reconnect.
+          </span>
+          <button className="send-error-dismiss" onClick={() => setSendError(null)}>
+            ×
+          </button>
         </div>
       )}
 
-      {/* eslint-disable react/no-unknown-property */}
-      <webview
-        ref={attachWebview}
-        src="https://kimi.ai"
-        // allowpopups must be present at guest-attach time: a webview that
-        // gains the attribute later still drops every window.open from the
-        // guest (observed Electron 39) — the login popup never surfaces.
-        // Runtime wants a string (React drops boolean true for non-boolean
-        // attributes); @types/react declares boolean — cast to satisfy TS.
-        allowpopups={'true' as unknown as boolean}
-        className="kimi-webview"
-        partition="persist:kimi"
-        webpreferences="contextIsolation=yes, nodeIntegration=no, allowRunningInsecureContent=no, javascript=yes, plugins=no, experimentalFeatures=no"
-        useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 KimiDesktop/1.0"
-      />
-      {/* eslint-enable react/no-unknown-property */}
+      <div className="input-area">
+        <textarea
+          ref={inputRef}
+          value={inputValue}
+          onChange={(e) => setInputValue(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' && !e.shiftKey) {
+              e.preventDefault()
+              void handleSendMessage()
+            }
+          }}
+          placeholder={
+            hasSession
+              ? 'Type your message... (Shift+Enter for a new line)'
+              : 'Log in with your Kimi account in settings to chat'
+          }
+          rows={1}
+        />
+        <button
+          onClick={handleSendMessage}
+          disabled={!inputValue.trim() || !hasSession}
+          className="send-btn"
+        >
+          {queueBusyHere ? '⏳' : '➤'}
+        </button>
+      </div>
+
+      <div className="offline-notice">
+        <p>
+          {forceOffline
+            ? 'Offline mode is forced — flip the title bar toggle (or Settings → Advanced) to return to the webview. Messages are still saved locally.'
+            : hasSession
+              ? "You're in offline mode. Messages are saved locally and will persist."
+              : 'Log in with your Kimi account (Settings → Kimi Account) to enable chat functionality.'}
+        </p>
+        <div className="notice-actions">
+          <button className="btn-secondary" onClick={handleNewConversation}>
+            📝 New Chat
+          </button>
+          {!forceOffline && (
+            <button className="btn-primary" onClick={handleRetry}>
+              🔄 Try Reconnecting
+            </button>
+          )}
+        </div>
+      </div>
+    </div>
+  ) : null
+
+  return (
+    <div className="webview-container">
+      {offlineView}
+
+      {webviewMounted && (
+        <div className="webview-surface" style={{ display: showOfflineView ? 'none' : 'flex' }}>
+          {isLoading && !loadError && (
+            <LoadingSkeleton
+              status={connectionStatus === 'checking' ? 'Reconnecting...' : 'Loading Kimi...'}
+              retryCount={retryCount}
+            />
+          )}
+
+          {loadError && !isLoading && (
+            <div className="error-container">
+              <div className="error-content">
+                <div className="error-icon">⚠️</div>
+                <h2>Failed to Load</h2>
+                <p className="error-message">{loadError}</p>
+                {retryCount > 0 && <p className="retry-count">Retry attempt {retryCount}/3</p>}
+
+                <div className="error-actions">
+                  <button className="btn-primary" onClick={handleRetry}>
+                    Reload Page
+                  </button>
+                  <button className="btn-secondary" onClick={() => window.api?.restartApp?.()}>
+                    Restart App
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* eslint-disable react/no-unknown-property */}
+          <webview
+            ref={attachWebview}
+            src="https://www.kimi.ai"
+            // allowpopups must be present at guest-attach time: a webview that
+            // gains the attribute later still drops every window.open from the
+            // guest (observed Electron 39) — the login popup never surfaces.
+            // Runtime wants a string (React drops boolean true for non-boolean
+            // attributes); @types/react declares boolean — cast to satisfy TS.
+            allowpopups={'true' as unknown as boolean}
+            className="kimi-webview"
+            partition="persist:kimi"
+            webpreferences="contextIsolation=yes, nodeIntegration=no, allowRunningInsecureContent=no, javascript=yes, plugins=no, experimentalFeatures=no"
+            useragent="Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36 KimiDesktop/1.0"
+          />
+          {/* eslint-enable react/no-unknown-property */}
+        </div>
+      )}
     </div>
   )
 }

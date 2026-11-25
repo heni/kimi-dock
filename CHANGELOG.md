@@ -5,6 +5,26 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.7] - 2026-11-25
+
+### Changed
+
+- **Offline↔online transitions are instant after the first load** — the
+  webview is now kept mounted (CSS-hidden) when the offline view shows,
+  the same pattern the artifact editor already used. Returning online no
+  longer reloads kimi.ai: no revalidation storm, no lost web-chat state —
+  the live SPA just reappears. The webview still mounts lazily (a boot
+  into offline mode renders none until the first transition), and "Try
+  Reconnecting"/"Reload Page" only reload when the first load never
+  finished or failed — a loaded SPA self-heals reconnects.
+- **Cold load shows a skeleton, not a black screen** — while kimi.ai
+  loads, the placeholder mirrors the shape of its greeting (light page,
+  logo block, input card, agent chips) with a shimmer (disabled under
+  reduced motion) and an honest status line, instead of four seconds of
+  black.
+- **The webview loads `https://www.kimi.ai` directly**, skipping the
+  302 redirect hop on every cold start.
+
 ## [3.5.6] - 2026-11-25
 
 ### Added
