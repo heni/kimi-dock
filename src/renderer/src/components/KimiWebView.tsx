@@ -66,6 +66,9 @@ export default function KimiWebView({
   const [sendError, setSendError] = useState<{ convId: string | null; message: string } | null>(
     null
   )
+  // Copy-answer feedback: which message was just copied (or failed to copy).
+  const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null)
+  const copyResetRef = useRef<NodeJS.Timeout | null>(null)
   const webviewRef = useRef<WebviewTag | null>(null)
   // The live webview element as state: load listeners attach off this, so
   // every (re)mount — offline boot, error-UI reload, surface switch —
@@ -438,6 +441,29 @@ export default function KimiWebView({
     setSendError(null)
   }
 
+  // Copy the raw markdown source of an assistant answer through the
+  // clipboard bridge; the ✓/✗ swap is the action's feedback (a silent
+  // no-op would violate the feedback rule). Both settle paths re-arm the
+  // reset, so a stale timer from an earlier copy cannot wipe a fresh ✗.
+  const finishCopy = (id: string, ok: boolean): void => {
+    setCopyState({ id, ok })
+    if (copyResetRef.current) clearTimeout(copyResetRef.current)
+    copyResetRef.current = setTimeout(() => setCopyState(null), 1500)
+  }
+
+  const handleCopyMessage = (msg: { id: string; content: string }): void => {
+    void window.api
+      ?.clipboardWrite('text', msg.content)
+      .then((result) => finishCopy(msg.id, !!result?.success))
+      .catch(() => finishCopy(msg.id, false))
+  }
+
+  useEffect(() => {
+    return () => {
+      if (copyResetRef.current) clearTimeout(copyResetRef.current)
+    }
+  }, [])
+
   const allMessages = activeConversation?.messages ?? []
   // Queue activity is keyed by conversation: a reply generating for another
   // chat must not show a typing indicator or an error under this one's
@@ -536,6 +562,22 @@ export default function KimiWebView({
                     )}
                     <div className="message-time">
                       {new Date(msg.timestamp).toLocaleTimeString()}
+                      {msg.role === 'assistant' && (
+                        <button
+                          className="copy-btn"
+                          onClick={() => handleCopyMessage(msg)}
+                          title="Copy answer (markdown source)"
+                          aria-label={
+                            copyState?.id === msg.id
+                              ? copyState.ok
+                                ? 'Copied'
+                                : 'Copy failed'
+                              : 'Copy answer'
+                          }
+                        >
+                          {copyState?.id === msg.id ? (copyState.ok ? '✓' : '✗') : '⧉'}
+                        </button>
+                      )}
                       {msg.role === 'user' && msg.syncStatus === 'pending' && (
                         <span className="pending"> (queued)</span>
                       )}

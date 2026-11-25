@@ -331,6 +331,20 @@
   margin-top: 6px;
 }
 
+.copy-btn {
+  background: none;
+  border: none;
+  color: #888;
+  cursor: pointer;
+  font-size: 11px;
+  margin-left: 8px;
+  padding: 0 2px;
+}
+
+.copy-btn:hover {
+  color: #fff;
+}
+
 .pending {
   color: #ff9800;
   font-style: italic;
