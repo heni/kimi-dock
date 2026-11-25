@@ -174,6 +174,9 @@ interface AppSettings {
 let mainWindow: BrowserWindow | null = null
 let tray: Tray | null = null
 let isQuiting = false
+// Mirror of the renderer's draft-store dirty count (drafts-set-count);
+// the close handler below gates the app exit on it.
+let unsavedDraftCount = 0
 let saveWindowStateTimer: NodeJS.Timeout | null = null
 
 // Default window state
@@ -473,9 +476,35 @@ function createWindow(): void {
       event.preventDefault()
       saveWindowState()
       mainWindow?.hide()
-    } else {
-      saveWindowState()
+      return
     }
+    // Unsaved editor drafts live only in the renderer's memory — exiting
+    // destroys them, so the exit asks first.
+    if (!isQuiting && unsavedDraftCount > 0 && mainWindow) {
+      event.preventDefault()
+      const count = unsavedDraftCount
+      void dialog
+        .showMessageBox(mainWindow, {
+          type: 'warning',
+          buttons: ['Quit', 'Keep editing'],
+          defaultId: 1,
+          cancelId: 1,
+          title: 'Unsaved drafts',
+          message: `${count} unsaved editor draft${count === 1 ? '' : 's'}`,
+          detail: 'Drafts live only in memory and are lost on exit.'
+        })
+        .then(({ response }) => {
+          if (response === 0) {
+            isQuiting = true
+            mainWindow?.close()
+          } else {
+            // Aborted quit: a scheduled restart must not survive it.
+            relaunchOnQuit = false
+          }
+        })
+      return
+    }
+    saveWindowState()
   })
 
   mainWindow.on('resize', () => {
@@ -552,7 +581,9 @@ function createTray() {
     {
       label: 'Quit',
       click: () => {
-        isQuiting = true
+        // No isQuiting pre-set: app.quit closes the window, and the close
+        // handler's unsaved-drafts gate must get its say first. It sets
+        // isQuiting itself when the quit is confirmed.
         app.quit()
       }
     }
@@ -602,9 +633,18 @@ ipcMain.on('close', () => {
   }
 })
 
+// Restart goes through the normal close path: the unsaved-drafts gate
+// gets its say, and will-quit stops the run processes (a bare
+// relaunch+exit(0) bypassed both). The relaunch itself is scheduled in
+// will-quit, so an aborted quit does not leave a pending relaunch behind.
+let relaunchOnQuit = false
 ipcMain.on('restart-app', () => {
-  app.relaunch()
-  app.exit(0)
+  relaunchOnQuit = true
+  if (mainWindow) {
+    mainWindow.close()
+  } else {
+    app.quit()
+  }
 })
 
 // Check for updates
@@ -1094,6 +1134,16 @@ ipcMain.handle('proc-start', async (_, payload: unknown) => {
   }
 })
 
+// Mirror of the renderer's draft-store dirty count; validated and stored
+// for the close handler's exit dialog.
+ipcMain.handle('drafts-set-count', async (_, count: unknown) => {
+  if (typeof count !== 'number' || !Number.isInteger(count) || count < 0 || count > 100000) {
+    return { success: false, error: 'Invalid count' }
+  }
+  unsavedDraftCount = count
+  return { success: true }
+})
+
 ipcMain.handle('proc-stop', async (_, id: unknown) => {
   if (typeof id !== 'string') return { success: false, error: 'Invalid id' }
   return { success: stopProcess(id) }
@@ -1194,8 +1244,11 @@ app.whenReady().then(() => {
   })
 })
 
-app.on('before-quit', () => {
+// will-quit, not before-quit: a quit aborted by the unsaved-drafts dialog
+// must not kill the running processes.
+app.on('will-quit', () => {
   stopAllProcesses()
+  if (relaunchOnQuit) app.relaunch()
 })
 
 app.on('window-all-closed', () => {

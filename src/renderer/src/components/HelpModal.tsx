@@ -13,6 +13,7 @@ const SHORTCUTS: Array<{ keys: string; action: string }> = [
   { keys: 'Ctrl+F5', action: 'Run the current file (artifact editor)' },
   { keys: 'Ctrl+Tab', action: 'Next artifact (artifact editor)' },
   { keys: 'Ctrl+Shift+Tab', action: 'Previous artifact (artifact editor)' },
+  { keys: 'Ctrl+K S', action: 'Save all drafts of this chat (artifact editor)' },
   { keys: 'Ctrl+Shift+V', action: 'Markdown: toggle edit / preview' },
   { keys: 'Ctrl+K V', action: 'Markdown: open the split view' },
   { keys: 'F1', action: 'Open this help' },

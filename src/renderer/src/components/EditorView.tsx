@@ -3,6 +3,14 @@ import CodeEditor, { CodeEditorHandle } from './CodeEditor'
 import MarkdownPreview from './MarkdownPreview'
 import RunPanel from './RunPanel'
 import { offlineManager } from '../utils/offlineManager'
+import {
+  setDraft,
+  getDraft,
+  hasDraft,
+  dirtyCount,
+  resolveSave,
+  saveAllDrafts
+} from '../utils/draftStore'
 import '../assets/EditorView.css'
 
 interface EditorViewProps {
@@ -11,6 +19,9 @@ interface EditorViewProps {
   onClose: () => void
   skillArmed: boolean
   onToggleSkill: () => void
+  // Picker selections are reported up so App's chat-switch draft guard
+  // knows which chat the editor is on.
+  onChatSelected?: (chatId: string) => void
 }
 
 interface ArtifactFile {
@@ -30,13 +41,20 @@ export default function EditorView({
   active,
   onClose,
   skillArmed,
-  onToggleSkill
+  onToggleSkill,
+  onChatSelected
 }: EditorViewProps): React.JSX.Element {
   const [activeChatId, setActiveChatId] = useState<string | null>(chatId)
   const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'unset'>('loading')
   const [chatDirs, setChatDirs] = useState<Array<{ id: string; title: string }>>([])
   const [files, setFiles] = useState<ArtifactFile[]>([])
   const [currentFile, setCurrentFile] = useState<string | null>(null)
+  // Mirrors currentFile for post-await guards: a save that resolves after
+  // the user switched files must not touch the new file's baseline.
+  const currentFileRef = useRef<string | null>(null)
+  useEffect(() => {
+    currentFileRef.current = currentFile
+  }, [currentFile])
   const [fileContent, setFileContent] = useState('')
   const [savedContent, setSavedContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
@@ -124,10 +142,22 @@ export default function EditorView({
     }
   }, [initWorkspace, refreshFiles])
 
+  // Open a file. Unsaved edits are never lost: every keystroke is written
+  // through to the draft store, so switching simply restores the target's
+  // draft (content + its disk baseline) when one exists — no confirm
+  // dialog, Sublime-style.
   const openFile = useCallback(
     async (path: string): Promise<void> => {
       if (!activeChatId) return
-      if (dirty && !window.confirm('Unsaved changes will be lost. Continue?')) return
+      const draft = getDraft(activeChatId, path)
+      if (draft) {
+        setCurrentFile(path)
+        setFileContent(draft.content)
+        setSavedContent(draft.base)
+        setError(null)
+        if (!isMarkdown(path)) setViewMode('edit')
+        return
+      }
       const result = await window.api?.fsRead(`${activeChatId}/${path}`)
       if (result?.success && result.content !== undefined) {
         setCurrentFile(path)
@@ -139,14 +169,20 @@ export default function EditorView({
         setError(result?.error ?? 'Failed to open the file')
       }
     },
-    [activeChatId, dirty]
+    [activeChatId]
   )
 
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
-    const result = await window.api?.fsWrite(`${activeChatId}/${currentFile}`, fileContent)
+    const path = currentFile
+    const written = fileContent
+    const result = await window.api?.fsWrite(`${activeChatId}/${path}`, written)
     if (result?.success) {
-      setSavedContent(fileContent)
+      // The user may have switched files during the write: the baseline of
+      // whatever is open NOW must not be touched then.
+      if (currentFileRef.current === path) setSavedContent(written)
+      // A keystroke that raced the write survives, re-based onto disk.
+      resolveSave(activeChatId, path, written)
       setError(null)
       return true
     }
@@ -154,11 +190,34 @@ export default function EditorView({
     return false
   }, [activeChatId, currentFile, fileContent])
 
+  // Ctrl+K S: save every dirty draft of THIS chat (other chats are never
+  // touched). Failures keep their drafts and are reported; the current
+  // file's baseline advances only if its own write landed.
+  const handleSaveAll = useCallback(async (): Promise<void> => {
+    if (!activeChatId) return
+    const fileAtStart = currentFile
+    const { failed } = await saveAllDrafts(activeChatId)
+    if (
+      fileAtStart &&
+      currentFileRef.current === fileAtStart &&
+      !hasDraft(activeChatId, fileAtStart)
+    ) {
+      setSavedContent(fileContent)
+    }
+    setError(failed > 0 ? `Failed to save ${failed} draft${failed === 1 ? '' : 's'}` : null)
+  }, [activeChatId, currentFile, fileContent])
+
   const handleCreateFile = async (): Promise<void> => {
     const name = newFileName?.trim()
     if (!name || !activeChatId) return
     if (name.startsWith('/') || name.split('/').includes('..')) {
       setError('Invalid file name')
+      return
+    }
+    // fsWrite truncates: creating over an existing artifact would silently
+    // destroy it (and orphan its draft).
+    if (files.some((file) => file.path === name)) {
+      setError('A file with this name already exists')
       return
     }
     const result = await window.api?.fsWrite(`${activeChatId}/${name}`, '')
@@ -210,8 +269,8 @@ export default function EditorView({
       }
       // Ctrl+Tab / Ctrl+Shift+Tab: cycle the chat's artifacts sequentially
       // with wrap-around (no tabs/MRU here — the honest analog of VS Code's
-      // Ctrl+PageUp/Down). Routes through openFile, so the unsaved-changes
-      // confirm protects cycling exactly as it protects clicking.
+      // Ctrl+PageUp/Down). Switching is loss-free: openFile restores drafts
+      // from the store, so cycling never asks and never discards.
       if (event.ctrlKey && event.key === 'Tab') {
         event.preventDefault()
         if (files.length === 0) return
@@ -225,17 +284,25 @@ export default function EditorView({
         if (next && next !== currentFile) void openFile(next)
         return
       }
-      if (!isMarkdown(currentFile)) return
-      if (event.ctrlKey && event.shiftKey && event.key === 'V') {
-        event.preventDefault()
-        setViewMode((mode) => (mode === 'preview' ? 'edit' : 'preview'))
-        return
-      }
+      // Ctrl+K chord arms for any file: Ctrl+K S saves all drafts of this
+      // chat; the V completion below stays markdown-only.
       if (event.ctrlKey && event.key === 'k') {
         chordRef.current = true
         setTimeout(() => {
           chordRef.current = false
         }, 1000)
+        return
+      }
+      if (chordRef.current && (event.key === 's' || event.key === 'S')) {
+        event.preventDefault()
+        chordRef.current = false
+        void handleSaveAll()
+        return
+      }
+      if (!isMarkdown(currentFile)) return
+      if (event.ctrlKey && event.shiftKey && event.key === 'V') {
+        event.preventDefault()
+        setViewMode((mode) => (mode === 'preview' ? 'edit' : 'preview'))
         return
       }
       if (chordRef.current && event.key === 'v') {
@@ -246,7 +313,7 @@ export default function EditorView({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [active, currentFile, saveCurrentFile, files, openFile])
+  }, [active, currentFile, saveCurrentFile, handleSaveAll, files, openFile])
 
   // Two-way scroll sync in split mode (ratio-based, loop-guarded).
   useEffect(() => {
@@ -312,10 +379,20 @@ export default function EditorView({
                 <button
                   key={dir.id}
                   className="chat-dir-item"
-                  onClick={() => setActiveChatId(dir.id)}
+                  onClick={() => {
+                    setActiveChatId(dir.id)
+                    // Keep App's editorChatId in sync, or its chat-switch
+                    // draft guard cannot see this chat later.
+                    onChatSelected?.(dir.id)
+                  }}
                 >
                   <span className="chat-dir-title">{dir.title}</span>
                   <span className="chat-dir-id">{dir.id}</span>
+                  {dirtyCount(dir.id) > 0 && (
+                    <span className="dirty-dot" title={`${dirtyCount(dir.id)} unsaved draft(s)`}>
+                      ●
+                    </span>
+                  )}
                 </button>
               ))}
             </div>
@@ -371,6 +448,9 @@ export default function EditorView({
                 title={file.path}
               >
                 {file.path}
+                {activeChatId && hasDraft(activeChatId, file.path) && (
+                  <span className="dirty-dot">●</span>
+                )}
               </button>
             ))
           )}
@@ -438,7 +518,14 @@ export default function EditorView({
                   ref={editorHandleRef}
                   value={fileContent}
                   fileName={currentFile}
-                  onChange={setFileContent}
+                  onChange={(value) => {
+                    setFileContent(value)
+                    // Write-through: the draft store always holds the latest
+                    // unsaved text, so any switch or remount restores it.
+                    if (activeChatId && currentFile) {
+                      setDraft(activeChatId, currentFile, value, savedContent)
+                    }
+                  }}
                   onSave={() => void saveCurrentFile()}
                 />
               </div>

@@ -155,6 +155,10 @@ contextBridge.exposeInMainWorld('api', {
   }): Promise<{ success: boolean; id?: string; error?: string }> =>
     ipcRenderer.invoke('proc-start', payload),
   procStop: (id: string): Promise<{ success: boolean }> => ipcRenderer.invoke('proc-stop', id),
+  // Fire-and-forget mirror of the draft store's dirty count; main's
+  // app-exit dialog gates on it.
+  setDraftCount: (count: number): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('drafts-set-count', count),
   onProcOutput: (
     callback: (event: { id: string; stream: 'stdout' | 'stderr'; data: string }) => void
   ): (() => void) => {

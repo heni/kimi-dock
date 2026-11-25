@@ -5,6 +5,30 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.9] - 2026-11-25
+
+### Changed
+
+- **Unsaved edits are drafts now, not a confirm dialog** (the Sublime
+  hot-exit model, session-scoped): every keystroke is written through to
+  an in-memory per-file draft store, so switching files (clicks or
+  Ctrl+Tab), surfaces or chats never loses work — the "Unsaved changes
+  will be lost" dialog is gone. Files with drafts show a dot in the
+  artifact list and in the chat picker; reopening a file restores its
+  draft with the dirty state intact.
+
+### Added
+
+- **Ctrl+K S saves all drafts of the current chat** (VS Code's Save All
+  chord; artifacts of other chats are never touched). Failures keep their
+  drafts and are reported.
+- **Chat-switch guard** — pointing the editor at another chat while the
+  current one holds drafts asks first: Save all & switch / Switch anyway
+  (drafts stay in memory) / Cancel, with the count.
+- **Exit warning** — quitting the app with drafts open shows a native
+  dialog with the total count (Quit / Keep editing); drafts live only in
+  memory, so this is the one destructive path left.
+
 ## [3.5.8] - 2026-11-25
 
 ### Added
