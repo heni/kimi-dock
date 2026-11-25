@@ -72,6 +72,10 @@ export default function KimiWebView({
   // Stick-to-bottom: new content auto-scrolls only while the user is at the
   // bottom; someone scrolled up into history is never yanked down.
   const stickToBottomRef = useRef(true)
+  // Last message id seen by the auto-scroll effect: the user-role override
+  // applies only to a genuine append, not to a queue transition re-firing
+  // the effect over a pre-existing pending last message.
+  const prevLastMessageIdRef = useRef<string | null>(null)
   // The queue reads the stored record on every pass; this mirror only answers
   // "is the queue's conversation still the one on screen".
   const conversationRef = useRef<Conversation | null>(null)
@@ -433,7 +437,9 @@ export default function KimiWebView({
   useLayoutEffect(() => {
     const el = messagesRef.current
     if (!el) return
-    if (stickToBottomRef.current || lastMessageRole === 'user') {
+    const isNewLastMessage = lastMessageId !== prevLastMessageIdRef.current
+    prevLastMessageIdRef.current = lastMessageId
+    if (stickToBottomRef.current || (isNewLastMessage && lastMessageRole === 'user')) {
       el.scrollTop = el.scrollHeight
     }
   }, [viewedConvId, showOfflineView, lastMessageId, lastMessageRole, queueBusyHere])
