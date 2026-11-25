@@ -5,7 +5,9 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  z-index: 1000;
+  /* Above Settings (10000) and the sidebar (9998): F1 must never open the
+     help invisibly behind another dialog. */
+  z-index: 10001;
 }
 
 .help-modal {
