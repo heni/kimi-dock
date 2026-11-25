@@ -219,7 +219,13 @@ try {
   console.log('[e2e] PASS')
 } finally {
   if (!app1Closed) await app.close()
-  if (settingsFile && originalSettingsRaw !== null) {
-    fs.writeFileSync(settingsFile, originalSettingsRaw)
+  if (settingsFile) {
+    if (originalSettingsRaw !== null) {
+      fs.writeFileSync(settingsFile, originalSettingsRaw)
+    } else {
+      // No settings.json existed before the run: step 8 created one — remove
+      // it rather than leave a forced-offline file the profile never had.
+      fs.rmSync(settingsFile, { force: true })
+    }
   }
 }
