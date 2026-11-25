@@ -41,7 +41,13 @@ suggesting a run.json.
 Top-level `"run"`; glob (relative to the chat directory) → command template;
 most specific glob wins; `*.ext` globs match at any depth. Placeholders:
 `{file}` absolute path of the saved file, `{dir}` its directory, `{name}`
-basename without extension, `{base}` basename with extension. Files are
+basename without extension, `{base}` basename with extension. **Placeholder
+values are substituted already shell-quoted** (single quotes) — never wrap
+them in quotes yourself: `python {file}`, not `python "{file}"` (a quoted
+placeholder would reach the program with literal quote characters in its
+path). Mid-word use is fine: `.bin/{name}` stays one word. Exception:
+`cwd` is a plain path, not shell input — placeholders there expand
+unquoted. Files are
 saved before the run. Multi-phase commands (`&&`, `;`, pipes) are the
 normal case — no separate "compile vs run" model. String form =
 `{ "command": <string> }`. Unknown keys are ignored (forward compat).

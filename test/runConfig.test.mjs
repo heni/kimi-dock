@@ -5,11 +5,13 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
+import { execFileSync } from 'node:child_process'
 import {
   matchGlob,
   parseRunJson,
   resolveRun,
-  substitutePlaceholders
+  substitutePlaceholders,
+  substitutePathPlaceholders
 } from '../.tmp/unit-build/main/runConfig.js'
 import { resolveInWorkspace } from '../.tmp/unit-build/main/workspace.js'
 
@@ -146,14 +148,49 @@ test('nested files resolve by extension too', () => {
 
 // --- substitutePlaceholders ---
 
-test('substitutePlaceholders replaces every token, repeated included', () => {
+test('substitutePlaceholders shell-quotes every token, repeated included', () => {
   const out = substitutePlaceholders('cc {file} -o .bin/{name} && .bin/{name} # {base} in {dir}', {
     file: '/w/c1/main.c',
     dir: '/w/c1',
     name: 'main',
     base: 'main.c'
   })
-  assert.equal(out, 'cc /w/c1/main.c -o .bin/main && .bin/main # main.c in /w/c1')
+  assert.equal(out, "cc '/w/c1/main.c' -o .bin/'main' && .bin/'main' # 'main.c' in '/w/c1'")
+})
+
+test('substituted values survive bash -c as single words (spaces, quotes)', () => {
+  // The owner case: a workspace path with a space was word-split by bash and
+  // go demanded a go.mod for the truncated first half. Round-trip through a
+  // real bash: the substituted command must pass the path as ONE argument.
+  const file = "/w/sample coding/it's here/test file.go"
+  const cmd = substitutePlaceholders("printf '%s\\n' {file}", {
+    file,
+    dir: '/w',
+    name: 'n',
+    base: 'b'
+  })
+  const out = execFileSync('/bin/bash', ['-c', cmd], { encoding: 'utf-8' })
+  assert.equal(out, file + '\n')
+})
+
+test('quoted values concatenate mid-word (.bin/{name} stays one word)', () => {
+  const cmd = substitutePlaceholders('cc {file} -o .bin/{name}', {
+    file: '/w/a b/m p.c',
+    dir: '/w/a b',
+    name: 'm p',
+    base: 'm p.c'
+  })
+  assert.equal(cmd, "cc '/w/a b/m p.c' -o .bin/'m p'")
+})
+
+test('substitutePathPlaceholders stays raw (spawn cwd is not shell input)', () => {
+  const out = substitutePathPlaceholders('{dir}/sub', {
+    file: '/w/a b/f.c',
+    dir: '/w/a b',
+    name: 'f',
+    base: 'f.c'
+  })
+  assert.equal(out, '/w/a b/sub')
 })
 
 // --- resolveInWorkspace ---

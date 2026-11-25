@@ -186,6 +186,24 @@ export interface PlaceholderContext {
 
 export function substitutePlaceholders(template: string, ctx: PlaceholderContext): string {
   return template
+    .replaceAll('{file}', shellQuote(ctx.file))
+    .replaceAll('{dir}', shellQuote(ctx.dir))
+    .replaceAll('{name}', shellQuote(ctx.name))
+    .replaceAll('{base}', shellQuote(ctx.base))
+}
+
+// Values are shell-quoted at substitution: a path with spaces or quotes
+// must survive `bash -c` as exactly one word (an unquoted path with a
+// space splits in two and the command fails on the truncated half).
+// Templates therefore must NOT add their own quotes around placeholders.
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
+// Raw counterpart for values that are NOT shell input: the spawn `cwd`
+// option is a plain path, quotes would become part of it.
+export function substitutePathPlaceholders(template: string, ctx: PlaceholderContext): string {
+  return template
     .replaceAll('{file}', ctx.file)
     .replaceAll('{dir}', ctx.dir)
     .replaceAll('{name}', ctx.name)
