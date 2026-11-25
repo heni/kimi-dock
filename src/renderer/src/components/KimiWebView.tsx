@@ -156,22 +156,21 @@ export default function KimiWebView({
 
   // Shared online transition: a brief 'checking', then online. A loaded SPA
   // self-heals reconnects — repeat transitions are instant, nothing spins.
-  // But a FAILED first load is wedged (the auto-retry only runs while
-  // navigator.onLine), so the transition must re-drive it, or the skeleton
-  // never clears.
+  // A FAILED load (first or later) is wedged — the auto-retry only runs
+  // while navigator.onLine — so the transition re-drives it here, the
+  // single reload path for the online case.
   const goOnlineTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const goOnline = useCallback((): void => {
     setConnectionStatus('checking')
-    if (!loadedOnceRef.current) {
+    const webview = webviewRef.current
+    if (loadError && webview) {
+      setLoadError(null)
+      setRetryCount(0)
       setIsLoading(true)
-      const webview = webviewRef.current
-      if (webview && loadError) {
-        setLoadError(null)
-        setRetryCount(0)
-        webview.reload()
-      }
-    } else {
-      setIsLoading(false)
+      webview.reload()
+    } else if (!retryTimeoutRef.current) {
+      // No reload in flight: spin only while a first load is still to come.
+      setIsLoading(!loadedOnceRef.current)
     }
     if (goOnlineTimeoutRef.current) clearTimeout(goOnlineTimeoutRef.current)
     goOnlineTimeoutRef.current = setTimeout(() => {
@@ -411,26 +410,27 @@ export default function KimiWebView({
     el.style.height = `${Math.min(el.scrollHeight, 120)}px`
   }, [inputValue])
 
-  // "Try Reconnecting" (offline view) / "Reload Page" (error surface). A
-  // loaded SPA self-heals reconnects — returning to it is instant, no
-  // reload. Only a failed or never-finished first load actually reloads;
-  // the transition itself is always driven so the surface follows.
+  // "Try Reconnecting" (offline view) / "Reload Page" (error surface).
+  // Online, goOnline re-drives a failed load itself — the single reload
+  // path, so a click cannot double-reload. Offline, an explicit reload is
+  // the only honest feedback a click can give (it will fail and re-show
+  // the error surface).
   const handleRetry = useCallback(() => {
-    const needsReload = !!loadError || !loadedOnceRef.current
-    setLoadError(null)
-    setRetryCount(0)
     if (retryTimeoutRef.current) {
       clearTimeout(retryTimeoutRef.current)
       retryTimeoutRef.current = null
     }
-    if (needsReload && webviewRef.current) {
+    setRetryCount(0)
+    if (navigator.onLine) {
+      goOnline()
+      return
+    }
+    setLoadError(null)
+    if (webviewRef.current) {
       setIsLoading(true)
       webviewRef.current.reload()
     }
-    if (navigator.onLine) {
-      goOnline()
-    }
-  }, [goOnline, loadError])
+  }, [goOnline])
 
   // Queue the message as 'pending' and let the serial queue deliver it. The
   // input is never blocked: typing and queueing work while a reply is
