@@ -11,10 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **The exit warning no longer triggers GNOME's "not responding" banner** —
   the drafts question was a window-modal dialog attached to the very
-  window whose close had just been cancelled, which GNOME's force-quit
-  timer reads as a hang. The dialog is now parentless, and "Quit"
-  re-issues the close with a force flag. (If the banner ever resurfaces,
-  the documented fallback is hiding the window while the question is up.)
+  window whose close had just been cancelled — the suspected trigger of
+  GNOME's force-quit timer. The dialog is now parentless (and single: a
+  repeated close request while it is up does not stack another), and
+  "Quit" re-issues the close with a force flag. (If the banner ever
+  resurfaces, the documented fallback is hiding the window while the
+  question is up.)
 
 ## [3.5.9] - 2026-11-25
 
