@@ -36,20 +36,20 @@ Rules:
 ## Naming traditions
 
 - **Kimi Dock** — this fork (product name, repo `heni/kimi-dock`).
-  *Not to be confused with:* **kimi-desktop** — the upstream project
+  _Not to be confused with:_ **kimi-desktop** — the upstream project
   (Virusilvester/kimi-desktop). The directory on disk is still named
   `kimi-desktop/`; the product, package and repo are `kimi-dock`.
 - **Kimi Code Plan** — the subscription this fork authenticates against
-  (`api.kimi.com/coding/v1`, OAuth device flow). *Synonyms:* "Kimi Code",
-  "Coding Plan" — [kimi-cli platforms.py]. *Not to be confused with:* **Kimi
+  (`api.kimi.com/coding/v1`, OAuth device flow). _Synonyms:_ "Kimi Code",
+  "Coding Plan" — [kimi-cli platforms.py]. _Not to be confused with:_ **Kimi
   Membership** (consumer subscription, web only, no API) and **Moonshot Open
   Platform** (pay-per-token API keys, `api.moonshot.ai` / `api.moonshot.cn`) —
   three separate Moonshot products, keys and billing are not interchangeable.
 - **Offline mode** — the app's fallback chat UI shown when the webview fails to
-  load. *Not to be confused with:* true offline operation — chat responses
+  load. _Not to be confused with:_ true offline operation — chat responses
   still require network (they go through the API); only history, search and
   local message storage work without network. **Forced offline mode**
-  (*force offline*) — the same UI shown on demand, without a network outage:
+  (_force offline_) — the same UI shown on demand, without a network outage:
   the persisted setting `forceOfflineMode` (3.4.0), flipped from a title-bar
   toggle or Settings → Advanced; a debugging aid. While forced, the offline
   view hides "Try Reconnecting"; the title-bar badge reads "Forced Offline".
@@ -59,17 +59,19 @@ Rules:
   indicator scroll only while the user is at the bottom (100 px threshold,
   `stickToBottomRef` in `KimiWebView.tsx`), so reading history is never
   yanked down. Re-engages when the user scrolls back to the bottom.
+  The bottom-at-latest position is the **live edge** (beUI's term,
+  `docs/ui-design.md` §4).
 - **userData** — Electron's per-app data directory (`~/.config/kimi-dock` on
   Linux). Holds `kimi-code.json` (OAuth session), `settings.json`,
-  `window-state.json`. *Not to be confused with:* the IndexedDB conversation
+  `window-state.json`. _Not to be confused with:_ the IndexedDB conversation
   storage, which lives in the renderer profile under the same root.
 - **Sync queue** — the set of conversations holding undelivered messages,
-  derived from the database by the `hasPending` index. *Not to be confused
-  with:* a queue as a persisted entity — by design it is always recoverable
+  derived from the database by the `hasPending` index. _Not to be confused
+  with:_ a queue as a persisted entity — by design it is always recoverable
   from the database snapshot. Storage half exists since 3.3.0 (DB v3: the
   `hasPending` index + `seq`/`syncStatus`/`lastSeq` fields); the read API and
   the engine ship with the sync unit (Block 5b).
-- **Sync schema v3** (*sync schema*) — the 3.3.0 conversation-storage model:
+- **Sync schema v3** (_sync schema_) — the 3.3.0 conversation-storage model:
   `Message.seq` (monotonic per conversation, issued by the store — ms
   timestamps may collide, `seq` must not), `Message.syncStatus`
   (`pending`/`syncing`/`synced`/`failed`; a missing field means `synced`),
@@ -78,7 +80,7 @@ Rules:
   `1/0` — counts `pending`/`syncing`/`failed` messages; the single predicate
   is `isUndelivered()` in `offlineManagerSchema.ts`), `Conversation.lastSeq`
   (the seq counter). Parts: renderer storage, unit tests, e2e migration.
-- **Workspace root** (*workspace folder*) — the user-chosen directory that
+- **Workspace root** (_workspace folder_) — the user-chosen directory that
   holds every chat's artifact directory; persisted as `workspaceRoot` in
   `settings.json`. The renderer reaches it only through the main-process FS
   gateway (`src/main/workspace.ts`), which normalizes every path and refuses
@@ -86,18 +88,18 @@ Rules:
   (editor, Settings), e2e.
 - **Chat directory** — `<workspaceRoot>/<chatId>/`, the artifact home of one
   conversation (the id is `Conversation.id`; the sidebar's `'new'` sentinel
-  never reaches the disk). Created lazily on the first file write. *Not to
-  be confused with:* the conversation record in IndexedDB — the directory
+  never reaches the disk). Created lazily on the first file write. _Not to
+  be confused with:_ the conversation record in IndexedDB — the directory
   holds files, the record holds messages.
 - **Artifact** — a non-hidden file inside a chat directory (dot-files and
   dot-directories — `.venv/`, `.git/`, `.bin/` — are hidden from the
   artifact list but stay accessible to the FS gateway; `run.json` is a
   normal visible artifact). Parts: renderer (editor), main (FS gateway).
-- **Run console** (*run panel*, *tier-1 run*) — the panel docked under the
+- **Run console** (_run panel_, _tier-1 run_) — the panel docked under the
   editor that runs the current file via `/bin/bash -c` with cwd = chat
   directory, streaming output, no stdin. Command resolution, later wins:
   built-in extension table → `run.json` at the chat directory root →
-  free-form command. *Not to be confused with:* a terminal — tier 2 (a real
+  free-form command. _Not to be confused with:_ a terminal — tier 2 (a real
   PTY) is a separate future unit over the same IPC surface.
 - **run.json** — the per-chat run configuration: top-level `"run"` mapping
   glob → command template (string) or `{ command, env, cwd, timeoutSec }`;
