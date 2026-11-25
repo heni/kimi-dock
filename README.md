@@ -93,9 +93,9 @@ architecture from any Linux host, pass it to electron-builder:
 npm run build && npx electron-builder --linux deb --x64   # → dist/kimi-dock_<version>_amd64.deb
 ```
 
-No native npm dependencies are involved (`npmRebuild: false`), so the
-cross-build needs no extra toolchain. Note that an x64 package built on an
-arm64 host cannot be launched there — verify it on the target machine.
+The app has no native npm dependencies, so the cross-build needs no extra
+toolchain. Note that an x64 package built on an arm64 host cannot be
+launched there — verify it on the target machine.
 
 The package's postinst installs the AppArmor profile
 (`/etc/apparmor.d/kimi-dock`) and reloads it, so the Chromium sandbox works

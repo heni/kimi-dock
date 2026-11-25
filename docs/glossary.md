@@ -53,6 +53,12 @@ Rules:
   the persisted setting `forceOfflineMode` (3.4.0), flipped from a title-bar
   toggle or Settings → Advanced; a debugging aid. While forced, the offline
   view hides "Try Reconnecting"; the title-bar badge reads "Forced Offline".
+- **Stick-to-bottom** — the offline chat's auto-scroll policy (3.5.1):
+  opening a conversation lands on the latest message; the user's own
+  just-sent message always scrolls into view; replies and the typing
+  indicator scroll only while the user is at the bottom (100 px threshold,
+  `stickToBottomRef` in `KimiWebView.tsx`), so reading history is never
+  yanked down. Re-engages when the user scrolls back to the bottom.
 - **userData** — Electron's per-app data directory (`~/.config/kimi-dock` on
   Linux). Holds `kimi-code.json` (OAuth session), `settings.json`,
   `window-state.json`. *Not to be confused with:* the IndexedDB conversation
