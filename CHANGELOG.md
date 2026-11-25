@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.4] - 2026-11-25
+
+### Fixed
+
+- **Run commands work in paths with spaces (and quotes)** — placeholder
+  values (`{file}`, `{dir}`, `{name}`, `{base}`) are now shell-quoted at
+  substitution, so a workspace or chat directory containing spaces no
+  longer splits the `bash -c` command in two. The owner-visible symptom
+  was misleading: a Go run failed with `go: go.mod file not found` because
+  `go run` received the truncated first half of the path as a package.
+  Templates must not add their own quotes around placeholders (documented
+  in the run.json skill); the `cwd` field stays a plain unquoted path —
+  it is a spawn option, not shell input.
+
 ## [3.5.3] - 2026-11-25
 
 ### Fixed

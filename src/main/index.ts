@@ -38,7 +38,7 @@ import {
   writeTextFile,
   resolveInWorkspace
 } from './workspace'
-import { resolveRun, substitutePlaceholders } from './runConfig'
+import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
 
 // Google login: GIS only falls back to its OAuth popup flow when FedCM is
@@ -1000,7 +1000,7 @@ ipcMain.handle('proc-resolve', async (_, chatId: unknown, relPath: unknown) => {
       ...resolved.spec,
       command: substitutePlaceholders(resolved.spec.command, ctx),
       ...(resolved.spec.cwd !== undefined
-        ? { cwd: substitutePlaceholders(resolved.spec.cwd, ctx) }
+        ? { cwd: substitutePathPlaceholders(resolved.spec.cwd, ctx) }
         : {})
     }
     return {

@@ -184,10 +184,30 @@ export interface PlaceholderContext {
   base: string // basename with extension
 }
 
+// One pass with a replacement FUNCTION: a replacement string would
+// reinterpret `$`-patterns ($$, $&, $`, $') in paths, and chained passes
+// would re-scan inserted values for more placeholders.
+const PLACEHOLDER_PATTERN = /\{(file|dir|name|base)\}/g
+
 export function substitutePlaceholders(template: string, ctx: PlaceholderContext): string {
-  return template
-    .replaceAll('{file}', ctx.file)
-    .replaceAll('{dir}', ctx.dir)
-    .replaceAll('{name}', ctx.name)
-    .replaceAll('{base}', ctx.base)
+  return template.replace(PLACEHOLDER_PATTERN, (_, key: string) =>
+    shellQuote(ctx[key as keyof PlaceholderContext])
+  )
+}
+
+// Values are shell-quoted at substitution: a path with spaces or quotes
+// must survive `bash -c` as exactly one word (an unquoted path with a
+// space splits in two and the command fails on the truncated half).
+// Templates therefore must NOT add their own quotes around placeholders.
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`
+}
+
+// Raw counterpart for values that are NOT shell input: the spawn `cwd`
+// option is a plain path, quotes would become part of it.
+export function substitutePathPlaceholders(template: string, ctx: PlaceholderContext): string {
+  return template.replace(
+    PLACEHOLDER_PATTERN,
+    (_, key: string) => ctx[key as keyof PlaceholderContext]
+  )
 }
