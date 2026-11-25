@@ -131,6 +131,8 @@ Press `F1` (or the title-bar `?`) in the app for the built-in list.
 | `Ctrl + Shift + S` | Toggle conversation sidebar             |
 | `Ctrl + S`         | Save the current file (artifact editor) |
 | `Ctrl + F5`        | Run the current file (artifact editor)  |
+| `Ctrl + Tab`       | Next artifact (artifact editor)         |
+| `Ctrl + Shift + Tab` | Previous artifact (artifact editor)   |
 | `Ctrl + Shift + V` | Markdown: toggle edit / preview         |
 | `Ctrl + K V`       | Markdown: open the split view           |
 | `F1`               | Keyboard shortcuts & help               |
