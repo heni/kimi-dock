@@ -1,5 +1,6 @@
 import { useEffect, useLayoutEffect, useState, useRef, useCallback } from 'react'
 import { Conversation, offlineManager } from '../utils/offlineManager'
+import ChatMarkdown from './ChatMarkdown'
 import {
   appendUserMessage,
   applyAssistantReply,
@@ -498,7 +499,11 @@ export default function KimiWebView({
                 <div key={msg.id} className={`message ${msg.role}`}>
                   <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
                   <div className="message-content">
-                    <div className="message-text">{msg.content}</div>
+                    {msg.role === 'assistant' ? (
+                      <ChatMarkdown content={msg.content} />
+                    ) : (
+                      <div className="message-text">{msg.content}</div>
+                    )}
                     <div className="message-time">
                       {new Date(msg.timestamp).toLocaleTimeString()}
                       {msg.role === 'user' && msg.syncStatus === 'pending' && (

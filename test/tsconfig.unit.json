@@ -2,6 +2,7 @@
   "compilerOptions": {
     "target": "es2022",
     "module": "es2022",
+    "moduleResolution": "bundler",
     "types": ["node"],
     "esModuleInterop": true,
     "skipLibCheck": true,
@@ -10,6 +11,7 @@
   "files": [
     "../src/renderer/src/utils/offlineManagerSchema.ts",
     "../src/renderer/src/utils/chatFlow.ts",
+    "../src/renderer/src/utils/markdown.ts",
     "../src/main/runConfig.ts",
     "../src/main/workspace.ts",
     "../src/main/runner.ts"

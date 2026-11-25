@@ -5,6 +5,20 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.2] - 2026-11-25
+
+### Fixed
+
+- **Offline chat renders markdown and TeX** — assistant replies now render
+  as formatted markdown (headers, bold, lists, code, tables; links open in
+  the system browser) with TeX math typeset by KaTeX (inline `$…$` and
+  display `$$…$$`), instead of showing the raw markup as plain text. User
+  messages stay plain text. The artifact editor's markdown preview gains
+  the same TeX support through the now-shared renderer. Raw HTML in
+  messages stays escaped (markdown-it `html: false`, KaTeX `trust: false`),
+  and a broken formula degrades to red source text instead of failing the
+  message.
+
 ## [3.5.1] - 2026-11-25
 
 ### Fixed

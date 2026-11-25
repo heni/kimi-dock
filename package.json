@@ -1,6 +1,6 @@
 {
   "name": "kimi-dock",
-  "version": "3.5.1",
+  "version": "3.5.2",
   "description": "Kimi Dock - desktop dock for Kimi AI (fork of kimi-desktop, uses Kimi Code Plan)",
   "main": "./out/main/index.js",
   "author": "heni <eugene.krokhalev@gmail.com>",
@@ -33,8 +33,10 @@
     "@electron-toolkit/preload": "^3.0.2",
     "@electron-toolkit/utils": "^4.0.0",
     "@iarna/rtf-to-html": "^1.1.0",
+    "@traptitech/markdown-it-katex": "^3.6.0",
     "codemirror": "^6.0.2",
     "electron-updater": "^6.3.9",
+    "katex": "^0.16.47",
     "markdown-it": "^15.0.3"
   },
   "devDependencies": {
