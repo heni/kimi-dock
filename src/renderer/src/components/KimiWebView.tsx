@@ -67,6 +67,15 @@ export default function KimiWebView({
     null
   )
   const webviewRef = useRef<WebviewTag | null>(null)
+  // The live webview element as state: load listeners attach off this, so
+  // every (re)mount — offline boot, error-UI reload, surface switch —
+  // re-arms them. Flag-based effect deps missed remounts where the flags
+  // happened not to change.
+  const [webviewEl, setWebviewEl] = useState<WebviewTag | null>(null)
+  const attachWebview = useCallback((el: WebviewTag | null): void => {
+    webviewRef.current = el
+    setWebviewEl(el)
+  }, [])
   const retryTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const inputRef = useRef<HTMLTextAreaElement | null>(null)
   const messagesRef = useRef<HTMLDivElement | null>(null)
@@ -131,10 +140,13 @@ export default function KimiWebView({
   // Shared online transition: a brief 'checking' (the loading overlay reads
   // "Reconnecting..."), then online. isLoading goes up here because the
   // transition (re)mounts the webview; its did-finish-load clears the flag.
+  const goOnlineTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const goOnline = useCallback((): void => {
     setConnectionStatus('checking')
     setIsLoading(true)
-    setTimeout(() => {
+    if (goOnlineTimeoutRef.current) clearTimeout(goOnlineTimeoutRef.current)
+    goOnlineTimeoutRef.current = setTimeout(() => {
+      goOnlineTimeoutRef.current = null
       setConnectionStatus('online')
       setLoadError(null)
       setRetryCount(0)
@@ -144,6 +156,12 @@ export default function KimiWebView({
   // Network status monitoring
   useEffect(() => {
     const handleOffline = (): void => {
+      // A real flap cancels the pending transition, or a stale 'online'
+      // would land after the network is already gone.
+      if (goOnlineTimeoutRef.current) {
+        clearTimeout(goOnlineTimeoutRef.current)
+        goOnlineTimeoutRef.current = null
+      }
       setConnectionStatus('offline')
       setIsLoading(false)
     }
@@ -279,12 +297,12 @@ export default function KimiWebView({
     }
   }, [connectionStatus, activeConversation, processQueue])
 
-  // Handle webview load events. Deps include showOfflineView: the offline
-  // branch renders no webview, so on an offline boot this effect first runs
-  // with a null ref — it must re-run when the webview (re)mounts on the
-  // transition, or did-finish-load never clears the spinner.
+  // Handle webview load events, keyed on the element itself: whenever a
+  // webview (re)mounts — offline boot transition, error-UI reload, surface
+  // switch — the listeners attach to the live element; without this,
+  // did-finish-load never clears the spinner on the fresh element.
   useEffect(() => {
-    const webview = webviewRef.current
+    const webview = webviewEl
     if (!webview) return
 
     const handleDidFinishLoad = (): void => {
@@ -327,7 +345,7 @@ export default function KimiWebView({
       webview.removeEventListener('did-fail-load', handleDidFailLoad as EventListener)
       webview.removeEventListener('console-message', handleConsoleMessage as EventListener)
     }
-  }, [retryCount, showOfflineView])
+  }, [webviewEl, retryCount])
 
   // Handle navigation from main process
   useEffect(() => {
@@ -644,7 +662,7 @@ export default function KimiWebView({
 
       {/* eslint-disable react/no-unknown-property */}
       <webview
-        ref={webviewRef}
+        ref={attachWebview}
         src="https://kimi.ai"
         // allowpopups must be present at guest-attach time: a webview that
         // gains the attribute later still drops every window.open from the
