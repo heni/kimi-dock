@@ -1,6 +1,7 @@
 /*
- * Verify that expected strings reached the packaged app (AI.md #24:
- * shipped JS is checked inside app.asar, not in out/).
+ * Verify that expected strings reached the packaged app: shipped JS is
+ * checked inside app.asar, not in out/ — out/ can differ from what was
+ * actually packaged.
  *
  *   npm run verify:artifact -- forceOfflineMode "Forced Offline"
  *
