@@ -128,40 +128,46 @@ export default function KimiWebView({
     return () => unsubscribe?.()
   }, [])
 
+  // Shared online transition: a brief 'checking' (the loading overlay reads
+  // "Reconnecting..."), then online. isLoading goes up here because the
+  // transition (re)mounts the webview; its did-finish-load clears the flag.
+  const goOnline = useCallback((): void => {
+    setConnectionStatus('checking')
+    setIsLoading(true)
+    setTimeout(() => {
+      setConnectionStatus('online')
+      setLoadError(null)
+      setRetryCount(0)
+    }, 1000)
+  }, [])
+
   // Network status monitoring
   useEffect(() => {
-    const handleOnline = (): void => {
-      setConnectionStatus('checking')
-      setTimeout(() => {
-        setConnectionStatus('online')
-        setLoadError(null)
-        setRetryCount(0)
-      }, 1000)
-    }
-
     const handleOffline = (): void => {
       setConnectionStatus('offline')
       setIsLoading(false)
     }
 
-    window.addEventListener('online', handleOnline)
+    window.addEventListener('online', goOnline)
     window.addEventListener('offline', handleOffline)
 
     const checkInterval = setInterval(() => {
       if (navigator.onLine && connectionStatus === 'offline') {
-        handleOnline()
+        goOnline()
       }
     }, 5000)
 
     return () => {
-      window.removeEventListener('online', handleOnline)
+      window.removeEventListener('online', goOnline)
       window.removeEventListener('offline', handleOffline)
       clearInterval(checkInterval)
       if (retryTimeoutRef.current) {
         clearTimeout(retryTimeoutRef.current)
       }
     }
-  }, [connectionStatus])
+  }, [connectionStatus, goOnline])
+
+  const showOfflineView = isOffline || connectionStatus === 'offline'
 
   // Serial send queue. Each pass reads the stored record fresh, sends the
   // full history (each message exactly once) and, on success, marks exactly
@@ -273,7 +279,10 @@ export default function KimiWebView({
     }
   }, [connectionStatus, activeConversation, processQueue])
 
-  // Handle webview load events
+  // Handle webview load events. Deps include showOfflineView: the offline
+  // branch renders no webview, so on an offline boot this effect first runs
+  // with a null ref — it must re-run when the webview (re)mounts on the
+  // transition, or did-finish-load never clears the spinner.
   useEffect(() => {
     const webview = webviewRef.current
     if (!webview) return
@@ -318,7 +327,7 @@ export default function KimiWebView({
       webview.removeEventListener('did-fail-load', handleDidFailLoad as EventListener)
       webview.removeEventListener('console-message', handleConsoleMessage as EventListener)
     }
-  }, [retryCount])
+  }, [retryCount, showOfflineView])
 
   // Handle navigation from main process
   useEffect(() => {
@@ -349,8 +358,12 @@ export default function KimiWebView({
     const webview = webviewRef.current
     if (webview) {
       webview.reload()
+    } else if (navigator.onLine) {
+      // Offline view: no webview to reload — drive the transition directly
+      // instead of waiting for the 5 s polling interval.
+      goOnline()
     }
-  }, [])
+  }, [goOnline])
 
   // Queue the message as 'pending' and let the serial queue deliver it. The
   // input is never blocked: typing and queueing work while a reply is
@@ -418,7 +431,6 @@ export default function KimiWebView({
       ? sendError
       : null
 
-  const showOfflineView = isOffline || connectionStatus === 'offline'
   const viewedConvId = activeConversation?.id ?? null
   const lastMessageId = allMessages[allMessages.length - 1]?.id ?? null
   const lastMessageRole = allMessages[allMessages.length - 1]?.role ?? null

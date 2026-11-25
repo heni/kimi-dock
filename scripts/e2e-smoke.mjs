@@ -8,6 +8,7 @@
  */
 import { _electron as electron } from 'playwright'
 import fs from 'node:fs'
+import path from 'node:path'
 
 const SHOTS = '/tmp/kimi-desktop-e2e'
 fs.mkdirSync(SHOTS, { recursive: true })
@@ -18,6 +19,10 @@ const app = await electron.launch({
   chromiumSandbox: !noSandbox
 })
 
+// Captured in the first instance, used by step 8's offline-boot relaunch.
+let userDataPath = null
+let settingsSnapshot = null
+
 try {
   const window = await app.firstWindow()
 
@@ -25,6 +30,21 @@ try {
   await window.waitForSelector('.titlebar', { timeout: 15000 })
   const title = await window.textContent('.title .version')
   console.log('[e2e] Window OK, version badge:', title?.trim() || '(none)')
+
+  userDataPath = await app.evaluate(({ app: electronApp }) => electronApp.getPath('userData'))
+  settingsSnapshot = await window.evaluate(() => window.api.getSettings())
+
+  // Steps 3+ expect the webview surface: leave forced-offline mode if the
+  // profile was saved with it (e.g. the owner testing the toggle). The
+  // original settings are restored by step 8's finally.
+  if (settingsSnapshot?.forceOfflineMode) {
+    await window.evaluate(
+      (s) => window.api.saveSettings({ ...s, forceOfflineMode: false }),
+      settingsSnapshot
+    )
+    await window.waitForSelector('webview.kimi-webview', { timeout: 15000 })
+    console.log('[e2e] Profile had forceOfflineMode=true — preset to false for the run')
+  }
 
   // 2) OAuth session from userData (migrated from upstream ~/.config/kimi-desktop)
   const oauth = await window.evaluate(() => window.api.oauthStatus())
@@ -162,8 +182,34 @@ try {
   // Keep-mounted editor: it leaves the visible surface but stays in the DOM.
   await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
   console.log('[e2e] Editor surface hidden, webview restored')
-
-  console.log('[e2e] PASS')
 } finally {
   await app.close()
 }
+
+// 8) Offline boot → online transition. Relaunch with forceOfflineMode
+// preset in the settings file, flip the title-bar toggle, and require the
+// loading overlay to DETACH — regression for the transition hanging on the
+// spinner when the webview first mounts after an offline boot (its load
+// listeners never attached, so did-finish-load never cleared isLoading).
+// Settings are restored from Node after the instance closes, so a failed
+// run cannot leave the profile forced-offline.
+const settingsFile = path.join(userDataPath, 'settings.json')
+fs.writeFileSync(
+  settingsFile,
+  JSON.stringify({ ...settingsSnapshot, forceOfflineMode: true }, null, 2)
+)
+const app2 = await electron.launch({ args: ['.'], chromiumSandbox: !noSandbox })
+try {
+  const window2 = await app2.firstWindow()
+  await window2.waitForSelector('.offline-chat-view', { timeout: 15000 })
+  console.log('[e2e] Offline boot: offline chat view shown')
+  await window2.click('.force-offline-toggle')
+  await window2.waitForSelector('webview.kimi-webview', { timeout: 15000 })
+  await window2.waitForSelector('.loading-overlay', { state: 'detached', timeout: 30000 })
+  console.log('[e2e] Offline boot → online: webview loaded, loading overlay detached')
+} finally {
+  await app2.close()
+  fs.writeFileSync(settingsFile, JSON.stringify(settingsSnapshot, null, 2))
+}
+
+console.log('[e2e] PASS')
