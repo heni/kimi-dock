@@ -1,8 +1,8 @@
 # UI design rules
 
 Standing design doc for UI/UX work in Kimi Dock. Read it before planning any
-unit that adds or changes a user-visible surface or interaction; its review
-checklist (§9) goes into the unit's PR plan.
+change that adds or modifies a user-visible surface or interaction; include
+the review checklist (§9) in the change's pull request description.
 
 Distilled primarily from the beUI guide _AI Chat UI in React_ [1], extended
 with the message-delivery discipline from [2][3] and the scroll-behavior
@@ -74,7 +74,9 @@ The bottom-at-latest position is the **live edge**; the policy is
 
 - Every async action acknowledges itself: a thinking row between send and
   first token, a queued marker on undelivered messages, a typing indicator
-  while a reply generates.
+  while a reply generates. (On a non-streaming surface, such as this
+  project's offline chat, the thinking row and the typing indicator are
+  one and the same element.)
 - Silent failure is forbidden. Error text says what happened, why, and
   what to do next, in plain language, and preserves the user's input.
 
@@ -86,11 +88,12 @@ across switches. A CSS-hidden surface must gate its global listeners
 
 ## 7. Where this lives in the code
 
-- Composer, stick-to-bottom, thinking row, send-error notice:
-  `src/renderer/src/components/KimiWebView.tsx`.
+- Composer, stick-to-bottom, typing indicator (`.typing-indicator`), and
+  the send-error notice: `src/renderer/src/components/KimiWebView.tsx`.
 - Message lifecycle (`seq`, `syncStatus`, `isUndelivered`):
-  `src/renderer/src/utils/offlineManagerSchema.ts`; queue flow helpers:
-  `src/renderer/src/utils/chatFlow.ts`.
+  `src/renderer/src/utils/offlineManagerSchema.ts` (only `pending` is
+  produced today; the schema reserves `failed` for a retry-exhausted
+  state); queue flow helpers: `src/renderer/src/utils/chatFlow.ts`.
 - Kept-mounted surfaces and their listener gating: `src/renderer/src/App.tsx`,
   `src/renderer/src/components/EditorView.tsx`.
 
@@ -106,7 +109,9 @@ across switches. A CSS-hidden surface must gate its global listeners
 
 ## 9. Review checklist for UI units
 
-Paste into the PR plan; the review-fix loop runs with it as `review_focus`.
+Paste this checklist into the pull request description of any UI change;
+whoever reviews the change — human or an automated review pass — walks it
+item by item.
 
 - [ ] Composer never blocks; Enter / Shift+Enter / IME-composition handled
 - [ ] Outgoing messages: stable client id, optimistic append, acknowledged
