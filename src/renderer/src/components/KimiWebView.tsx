@@ -9,6 +9,7 @@ import {
 } from '../utils/chatFlow'
 import RUN_JSON_SKILL from '../../../../resources/skills/run-json/SKILL.md?raw'
 import LoadingSkeleton from './LoadingSkeleton'
+import { decideOnlineTransition } from '../utils/transition'
 import '../assets/KimiWebView.css'
 
 type ConnectionStatus = 'online' | 'offline' | 'checking' | 'error'
@@ -162,16 +163,18 @@ export default function KimiWebView({
   const goOnlineTimeoutRef = useRef<NodeJS.Timeout | null>(null)
   const goOnline = useCallback((): void => {
     setConnectionStatus('checking')
-    const webview = webviewRef.current
-    if (loadError && webview) {
+    const decision = decideOnlineTransition({
+      hasWebview: webviewRef.current !== null,
+      loadedOnce: loadedOnceRef.current,
+      loadError,
+      retryPending: retryTimeoutRef.current !== null
+    })
+    if (decision.reload) {
       setLoadError(null)
       setRetryCount(0)
-      setIsLoading(true)
-      webview.reload()
-    } else if (!retryTimeoutRef.current) {
-      // No reload in flight: spin only while a first load is still to come.
-      setIsLoading(!loadedOnceRef.current)
     }
+    if (decision.isLoading !== null) setIsLoading(decision.isLoading)
+    if (decision.reload) webviewRef.current?.reload()
     if (goOnlineTimeoutRef.current) clearTimeout(goOnlineTimeoutRef.current)
     goOnlineTimeoutRef.current = setTimeout(() => {
       goOnlineTimeoutRef.current = null
