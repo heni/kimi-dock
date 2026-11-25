@@ -143,6 +143,7 @@ declare global {
         timeoutSec?: number
       }) => Promise<{ success: boolean; id?: string; error?: string }>
       procStop: (id: string) => Promise<{ success: boolean }>
+      setDraftCount: (count: number) => Promise<{ success: boolean; error?: string }>
       onProcOutput: (
         callback: (event: { id: string; stream: 'stdout' | 'stderr'; data: string }) => void
       ) => () => void

@@ -69,3 +69,14 @@
   line-height: 1.5;
   margin: 6px 0;
 }
+
+.draft-guard-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 14px;
+  flex-wrap: wrap;
+}
+
+.draft-guard-error {
+  color: #ff6b6b;
+}

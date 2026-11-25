@@ -515,3 +515,9 @@
 .run-exit.ok {
   color: #81c784;
 }
+
+.artifact-item .dirty-dot,
+.chat-dir-item .dirty-dot {
+  margin-left: 6px;
+  color: #e8b339;
+}

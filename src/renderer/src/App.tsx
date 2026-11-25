@@ -6,6 +6,7 @@ import HelpModal from './components/HelpModal'
 import ConversationSidebar from './components/ConversationSidebar'
 import EditorView from './components/EditorView'
 import { Conversation, offlineManager } from './utils/offlineManager'
+import { subscribeDrafts, dirtyCount, saveAllDrafts } from './utils/draftStore'
 
 // Error Boundary for catching React errors
 class ErrorBoundary extends Component<
@@ -88,6 +89,15 @@ function App(): React.JSX.Element {
   const [editorChatId, setEditorChatId] = useState<string | null>(null)
   const [editorMounted, setEditorMounted] = useState(false)
   const [runSkillArmed, setRunSkillArmed] = useState(false)
+  // Chat-switch guard: leaving a chat whose editor holds dirty drafts asks
+  // first (Save all & switch / Switch anyway / Cancel) — drafts of another
+  // chat are invisible from the new context, so a silent switch would
+  // strand them.
+  const [draftGuard, setDraftGuard] = useState<{
+    target: Conversation
+    count: number
+    error: string | null
+  } | null>(null)
 
   // Effective offline: network down, or the user forced offline mode
   // (title bar toggle / Settings → Advanced) — e.g. for debugging.
@@ -147,15 +157,57 @@ function App(): React.JSX.Element {
     }
   }, [checkSession])
 
+  // Mirror the draft count into main: the app-exit dialog gates on it.
+  useEffect(() => {
+    const push = (): void => {
+      void window.api?.setDraftCount?.(dirtyCount())
+    }
+    push()
+    return subscribeDrafts(push)
+  }, [])
+
   const handleSelectConversation = useCallback((conversation: Conversation) => {
     setCurrentConversation(conversation)
   }, [])
 
-  const handleOpenArtifacts = useCallback((conversation: Conversation) => {
-    setEditorChatId(conversation.id)
+  const handleOpenArtifacts = useCallback(
+    (conversation: Conversation) => {
+      if (editorChatId && conversation.id !== editorChatId) {
+        const count = dirtyCount(editorChatId)
+        if (count > 0) {
+          setDraftGuard({ target: conversation, count, error: null })
+          return
+        }
+      }
+      setEditorChatId(conversation.id)
+      setEditorMounted(true)
+      setSurface('editor')
+    },
+    [editorChatId]
+  )
+
+  const handleDraftGuardSaveSwitch = useCallback(async (): Promise<void> => {
+    if (!draftGuard || !editorChatId) return
+    const { failed } = await saveAllDrafts(editorChatId)
+    if (failed > 0) {
+      setDraftGuard({ ...draftGuard, error: `Failed to save ${failed} draft(s) — still here.` })
+      return
+    }
+    const target = draftGuard.target
+    setDraftGuard(null)
+    setEditorChatId(target.id)
     setEditorMounted(true)
     setSurface('editor')
-  }, [])
+  }, [draftGuard, editorChatId])
+
+  const handleDraftGuardSwitchAnyway = useCallback((): void => {
+    if (!draftGuard) return
+    const target = draftGuard.target
+    setDraftGuard(null)
+    setEditorChatId(target.id)
+    setEditorMounted(true)
+    setSurface('editor')
+  }, [draftGuard])
 
   const handleToggleEditor = useCallback(() => {
     setSurface((prev) => {
@@ -252,6 +304,32 @@ function App(): React.JSX.Element {
         />
 
         <HelpModal isOpen={isHelpOpen} onClose={() => setIsHelpOpen(false)} />
+
+        {draftGuard && (
+          <div className="help-overlay" onClick={() => setDraftGuard(null)}>
+            <div className="help-modal" onClick={(event) => event.stopPropagation()}>
+              <h2>Unsaved drafts</h2>
+              <p>
+                The editor holds {draftGuard.count} unsaved{' '}
+                {draftGuard.count === 1 ? 'draft' : 'drafts'} in the current chat. Drafts stay in
+                memory when you switch, but they are only visible — and only saveable — in their own
+                chat.
+              </p>
+              {draftGuard.error && <p className="draft-guard-error">{draftGuard.error}</p>}
+              <div className="draft-guard-actions">
+                <button className="btn-primary" onClick={() => void handleDraftGuardSaveSwitch()}>
+                  Save all &amp; switch
+                </button>
+                <button className="btn-secondary" onClick={handleDraftGuardSwitchAnyway}>
+                  Switch anyway
+                </button>
+                <button className="btn-secondary" onClick={() => setDraftGuard(null)}>
+                  Cancel
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </ErrorBoundary>
   )
