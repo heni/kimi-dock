@@ -40,6 +40,7 @@ import {
 } from './workspace'
 import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
+import { LastRun, RunHelpDeps, ChatResponse, runHelpLoop } from './runHelp'
 
 // Google login: GIS only falls back to its OAuth popup flow when FedCM is
 // unavailable. Disabling the FedCm feature makes navigator.credentials.get
@@ -753,6 +754,7 @@ ipcMain.handle(
       method: string
       path: string
       body?: any
+      runHelp?: { chatId: string }
     }
   ) => {
     try {
@@ -779,34 +781,83 @@ ipcMain.handle(
       }
 
       const url = `${CODING_API_BASE}${path}`
-      const doFetch = async (): Promise<Response> =>
+      const doFetch = async (requestBody: unknown): Promise<Response> =>
         fetch(url, {
           method,
           headers: {
             Authorization: `Bearer ${accessToken}`,
-            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
+            ...(requestBody !== undefined ? { 'Content-Type': 'application/json' } : {})
           },
-          body: body !== undefined ? JSON.stringify(body) : undefined
+          body: requestBody !== undefined ? JSON.stringify(requestBody) : undefined
         })
 
-      let response = await doFetch()
-
-      // On 401 try one forced token refresh and retry the request
-      if (response.status === 401) {
-        accessToken = await forceRefreshAccessToken()
-        if (!accessToken) {
-          return { success: false, status: 401, error: 'Session expired, please log in again' }
+      // One proxied chat call with a single forced-refresh retry on 401.
+      const chatOnce = async (
+        requestBody: unknown
+      ): Promise<{ ok: boolean; status: number; data?: ChatResponse; error?: string }> => {
+        let response = await doFetch(requestBody)
+        if (response.status === 401) {
+          accessToken = await forceRefreshAccessToken()
+          if (!accessToken) {
+            return { ok: false, status: 401, error: 'Session expired, please log in again' }
+          }
+          response = await doFetch(requestBody)
         }
-        response = await doFetch()
+        const data = (await response.json()) as ChatResponse
+        return {
+          ok: response.ok,
+          status: response.status,
+          data,
+          error: response.ok ? undefined : (data?.error?.message ?? `HTTP ${response.status}`)
+        }
       }
 
-      const data = await response.json()
+      // AI run-help: the same endpoint, but with tools and a main-side agent
+      // loop (probe-confirmed tool calling). chatId is validated and every
+      // tool is confined to that chat directory.
+      if (requestData.runHelp !== undefined) {
+        if (!isRecord(requestData.runHelp) || typeof requestData.runHelp.chatId !== 'string') {
+          return { success: false, error: 'Invalid runHelp payload' }
+        }
+        const root = getWorkspaceRoot()
+        const chatDir = resolveChatDir(root, requestData.runHelp.chatId)
+        const chatId = requestData.runHelp.chatId
+        if (!isRecord(body) || typeof body.model !== 'string' || !Array.isArray(body.messages)) {
+          return { success: false, error: 'Invalid chat body' }
+        }
+        const deps: RunHelpDeps = {
+          getLastRun: () => lastRunByChat.get(chatId) ?? null,
+          readArtifact: (relPath) => readTextFile(chatDir, relPath),
+          listArtifacts: () => listFilesRecursive(chatDir, '.').map((f) => f.path),
+          getRunJson: () => {
+            try {
+              return readTextFile(chatDir, 'run.json')
+            } catch {
+              return null
+            }
+          }
+        }
+        try {
+          const content = await runHelpLoop(chatOnce, deps, body.model, body.messages)
+          // Same envelope shape as a plain proxied reply, so the renderer's
+          // queue consumes it unchanged.
+          return {
+            success: true,
+            status: 200,
+            data: { choices: [{ message: { content } }] },
+            error: null
+          }
+        } catch (error) {
+          return { success: false, error: (error as Error).message }
+        }
+      }
 
+      const result = await chatOnce(body)
       return {
-        success: response.ok,
-        status: response.status,
-        data: data,
-        error: response.ok ? null : data.error?.message || `HTTP ${response.status}`
+        success: result.ok,
+        status: result.status,
+        data: result.data,
+        error: result.error ?? null
       }
     } catch (error) {
       console.error('[API Proxy] Error:', error)
@@ -1016,6 +1067,18 @@ ipcMain.handle('proc-resolve', async (_, chatId: unknown, relPath: unknown) => {
 const PROC_COMMAND_MAX_LENGTH = 4000
 const PROC_ENV_MAX_ENTRIES = 50
 const PROC_TIMEOUT_MAX_SEC = 3600
+const PROC_SOURCE_MAX_LENGTH = 32
+const RUN_TAIL_MAX_CHARS = 8 * 1024
+
+// Last run per chat directory, teed off proc-start for the AI run-help
+// tools (get_run_output). Tails are capped; the map holds one record per
+// chat, so it cannot grow unbounded within a session.
+const lastRunByChat = new Map<string, LastRun>()
+
+const appendTail = (tail: string, data: string): string => {
+  const next = tail + data
+  return next.length > RUN_TAIL_MAX_CHARS ? next.slice(next.length - RUN_TAIL_MAX_CHARS) : next
+}
 
 ipcMain.handle('proc-start', async (_, payload: unknown) => {
   try {
@@ -1072,17 +1135,44 @@ ipcMain.handle('proc-start', async (_, payload: unknown) => {
       timeoutSec = payload.timeoutSec
     }
 
+    let source: string | undefined
+    if (payload.source !== undefined) {
+      if (typeof payload.source !== 'string' || payload.source.length > PROC_SOURCE_MAX_LENGTH) {
+        throw new Error('Invalid source')
+      }
+      source = payload.source
+    }
+
+    const runRecord: LastRun = {
+      command: payload.command,
+      ...(source !== undefined ? { source } : {}),
+      exitCode: null,
+      signal: null,
+      stdoutTail: '',
+      stderrTail: '',
+      endedAt: null
+    }
+    lastRunByChat.set(payload.chatId as string, runRecord)
+
     const id = startProcess({
       command: payload.command,
       cwd,
       env,
       timeoutSec,
       onOutput: (stream, data) => {
+        if (stream === 'stdout') {
+          runRecord.stdoutTail = appendTail(runRecord.stdoutTail, data)
+        } else {
+          runRecord.stderrTail = appendTail(runRecord.stderrTail, data)
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('proc-output', { id, stream, data })
         }
       },
       onExit: (code, signal) => {
+        runRecord.exitCode = code
+        runRecord.signal = signal
+        runRecord.endedAt = Date.now()
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('proc-exit', { id, code, signal })
         }

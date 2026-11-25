@@ -23,6 +23,7 @@ export interface Message {
   queuedAt?: number
   syncedAt?: number
   editedAt?: number // Set on content edits only
+  kind?: string // 'run-help' marks the AI run-help trigger; enables tools for the conversation
 }
 
 export interface Conversation {

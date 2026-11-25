@@ -9,7 +9,7 @@ import type { Conversation, Message } from './offlineManagerSchema'
 // a new message is user-visible activity.
 export function appendUserMessage(
   conversation: Conversation,
-  input: { id: string; content: string; now: number }
+  input: { id: string; content: string; now: number; kind?: string }
 ): Conversation {
   const message: Message = {
     id: input.id,
@@ -17,7 +17,8 @@ export function appendUserMessage(
     content: input.content,
     timestamp: input.now,
     syncStatus: 'pending',
-    queuedAt: input.now
+    queuedAt: input.now,
+    ...(input.kind !== undefined ? { kind: input.kind } : {})
   }
   return {
     ...conversation,
