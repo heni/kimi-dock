@@ -337,7 +337,11 @@ function App(): React.JSX.Element {
               </p>
               {draftGuard.error && <p className="draft-guard-error">{draftGuard.error}</p>}
               <div className="draft-guard-actions">
-                <button className="btn-primary" onClick={() => void handleDraftGuardSaveSwitch()}>
+                <button
+                  className="btn-primary"
+                  autoFocus
+                  onClick={() => void handleDraftGuardSaveSwitch()}
+                >
                   Save all &amp; switch
                 </button>
                 <button className="btn-secondary" onClick={handleDraftGuardSwitchAnyway}>

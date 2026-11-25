@@ -497,6 +497,9 @@ function createWindow(): void {
           if (response === 0) {
             isQuiting = true
             mainWindow?.close()
+          } else {
+            // Aborted quit: a scheduled restart must not survive it.
+            relaunchOnQuit = false
           }
         })
       return
@@ -630,9 +633,18 @@ ipcMain.on('close', () => {
   }
 })
 
+// Restart goes through the normal close path: the unsaved-drafts gate
+// gets its say, and will-quit stops the run processes (a bare
+// relaunch+exit(0) bypassed both). The relaunch itself is scheduled in
+// will-quit, so an aborted quit does not leave a pending relaunch behind.
+let relaunchOnQuit = false
 ipcMain.on('restart-app', () => {
-  app.relaunch()
-  app.exit(0)
+  relaunchOnQuit = true
+  if (mainWindow) {
+    mainWindow.close()
+  } else {
+    app.quit()
+  }
 })
 
 // Check for updates
@@ -1236,6 +1248,7 @@ app.whenReady().then(() => {
 // must not kill the running processes.
 app.on('will-quit', () => {
   stopAllProcesses()
+  if (relaunchOnQuit) app.relaunch()
 })
 
 app.on('window-all-closed', () => {

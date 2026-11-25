@@ -49,6 +49,12 @@ export default function EditorView({
   const [chatDirs, setChatDirs] = useState<Array<{ id: string; title: string }>>([])
   const [files, setFiles] = useState<ArtifactFile[]>([])
   const [currentFile, setCurrentFile] = useState<string | null>(null)
+  // Mirrors currentFile for post-await guards: a save that resolves after
+  // the user switched files must not touch the new file's baseline.
+  const currentFileRef = useRef<string | null>(null)
+  useEffect(() => {
+    currentFileRef.current = currentFile
+  }, [currentFile])
   const [fileContent, setFileContent] = useState('')
   const [savedContent, setSavedContent] = useState('')
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
@@ -168,12 +174,15 @@ export default function EditorView({
 
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
+    const path = currentFile
     const written = fileContent
-    const result = await window.api?.fsWrite(`${activeChatId}/${currentFile}`, written)
+    const result = await window.api?.fsWrite(`${activeChatId}/${path}`, written)
     if (result?.success) {
-      setSavedContent(written)
+      // The user may have switched files during the write: the baseline of
+      // whatever is open NOW must not be touched then.
+      if (currentFileRef.current === path) setSavedContent(written)
       // A keystroke that raced the write survives, re-based onto disk.
-      resolveSave(activeChatId, currentFile, written)
+      resolveSave(activeChatId, path, written)
       setError(null)
       return true
     }
@@ -186,8 +195,13 @@ export default function EditorView({
   // file's baseline advances only if its own write landed.
   const handleSaveAll = useCallback(async (): Promise<void> => {
     if (!activeChatId) return
+    const fileAtStart = currentFile
     const { failed } = await saveAllDrafts(activeChatId)
-    if (currentFile && !hasDraft(activeChatId, currentFile)) {
+    if (
+      fileAtStart &&
+      currentFileRef.current === fileAtStart &&
+      !hasDraft(activeChatId, fileAtStart)
+    ) {
       setSavedContent(fileContent)
     }
     setError(failed > 0 ? `Failed to save ${failed} draft${failed === 1 ? '' : 's'}` : null)

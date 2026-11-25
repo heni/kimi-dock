@@ -11,11 +11,11 @@ export interface Draft {
   base: string // last known disk content — the dirty baseline
 }
 
-const drafts = new Map<string, Draft>() // key: `${chatId}${path}`
+const drafts = new Map<string, Draft>() // key: `${chatId}\u0000${path}`
 const listeners = new Set<() => void>()
 
 // " " separators: chat dir names are user-visible and may contain spaces.
-const key = (chatId: string, path: string): string => `${chatId}${path}`
+const key = (chatId: string, path: string): string => `${chatId}\u0000${path}`
 
 function notify(): void {
   for (const fn of listeners) fn()
@@ -55,7 +55,7 @@ export function hasDraft(chatId: string, path: string): boolean {
 }
 
 export function dirtyPaths(chatId: string): string[] {
-  const prefix = `${chatId}`
+  const prefix = `${chatId}\u0000`
   const out: string[] = []
   for (const k of drafts.keys()) {
     if (k.startsWith(prefix)) out.push(k.slice(prefix.length))
@@ -65,7 +65,7 @@ export function dirtyPaths(chatId: string): string[] {
 
 export function dirtyCount(chatId?: string): number {
   if (chatId === undefined) return drafts.size
-  const prefix = `${chatId}`
+  const prefix = `${chatId}\u0000`
   let count = 0
   for (const k of drafts.keys()) {
     if (k.startsWith(prefix)) count += 1
@@ -101,7 +101,7 @@ export function clearAllDrafts(): void {
 // (keystrokes racing the write survive, re-based); failures keep their
 // drafts and are reported by count.
 export async function saveAllDrafts(chatId: string): Promise<{ saved: number; failed: number }> {
-  const prefix = `${chatId}`
+  const prefix = `${chatId}\u0000`
   let saved = 0
   let failed = 0
   for (const [k, draft] of [...drafts.entries()]) {
