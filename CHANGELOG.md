@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.11] - 2026-11-25
+
+### Changed
+
+- **Test hardening, no behavior change** — the two decision cores that
+  lived inside components (artifact cycling for Ctrl+Tab; the online
+  transition's spinner/reload decision, source of two 3.5.7 loop findings)
+  are extracted into pure modules (`artifactNav`, `transition`) and
+  covered by 11 unit tests covering the exact cases the review loops
+  walked by hand.
+
 ## [3.5.10] - 2026-11-25
 
 ### Fixed

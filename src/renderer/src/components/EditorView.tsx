@@ -11,6 +11,7 @@ import {
   resolveSave,
   saveAllDrafts
 } from '../utils/draftStore'
+import { nextArtifactPath } from '../utils/artifactNav'
 import '../assets/EditorView.css'
 
 interface EditorViewProps {
@@ -273,15 +274,9 @@ export default function EditorView({
       // from the store, so cycling never asks and never discards.
       if (event.ctrlKey && event.key === 'Tab') {
         event.preventDefault()
-        if (files.length === 0) return
         const paths = files.map((file) => file.path)
-        const idx = currentFile ? paths.indexOf(currentFile) : -1
-        // idx -1 (no file open, or it vanished): forward opens the first
-        // artifact, backward the last.
-        const next = event.shiftKey
-          ? paths[idx <= 0 ? paths.length - 1 : idx - 1]
-          : paths[(idx + 1) % paths.length]
-        if (next && next !== currentFile) void openFile(next)
+        const next = nextArtifactPath(paths, currentFile, event.shiftKey)
+        if (next) void openFile(next)
         return
       }
       // Ctrl+K chord arms for any file: Ctrl+K S saves all drafts of this
