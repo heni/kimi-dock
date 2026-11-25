@@ -193,6 +193,34 @@ test('substitutePathPlaceholders stays raw (spawn cwd is not shell input)', () =
   assert.equal(out, '/w/a b/sub')
 })
 
+test('dollar patterns in paths are not reinterpreted ($$, $&, $`)', () => {
+  // String.replaceAll with a replacement STRING would expand $-patterns;
+  // the substitution must be byte-identical for any path.
+  const ctx = { dir: '/w', name: 'f', base: 'f.go' }
+  assert.equal(
+    substitutePlaceholders('go run {file}', { ...ctx, file: '/w/a$$b/f.go' }),
+    "go run '/w/a$$b/f.go'"
+  )
+  assert.equal(
+    substitutePlaceholders('go run {file}', { ...ctx, file: '/w/a$&b/f.go' }),
+    "go run '/w/a$&b/f.go'"
+  )
+  assert.equal(
+    substitutePathPlaceholders('{dir}/x', { ...ctx, file: '/f', dir: '/w/a$`b' }),
+    '/w/a$`b/x'
+  )
+})
+
+test('inserted values are not re-scanned for placeholders', () => {
+  const out = substitutePathPlaceholders('{dir}/x', {
+    file: '/f',
+    dir: '/w/{file}',
+    name: 'n',
+    base: 'b'
+  })
+  assert.equal(out, '/w/{file}/x')
+})
+
 // --- resolveInWorkspace ---
 
 test('resolveInWorkspace resolves nested paths inside the root', () => {
