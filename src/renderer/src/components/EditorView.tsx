@@ -217,8 +217,10 @@ export default function EditorView({
         if (files.length === 0) return
         const paths = files.map((file) => file.path)
         const idx = currentFile ? paths.indexOf(currentFile) : -1
+        // idx -1 (no file open, or it vanished): forward opens the first
+        // artifact, backward the last.
         const next = event.shiftKey
-          ? paths[(idx - 1 + paths.length) % paths.length]
+          ? paths[idx <= 0 ? paths.length - 1 : idx - 1]
           : paths[(idx + 1) % paths.length]
         if (next && next !== currentFile) void openFile(next)
         return
