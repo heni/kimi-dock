@@ -80,6 +80,11 @@ Rules:
   `1/0` — counts `pending`/`syncing`/`failed` messages; the single predicate
   is `isUndelivered()` in `offlineManagerSchema.ts`), `Conversation.lastSeq`
   (the seq counter). Parts: renderer storage, unit tests, e2e migration.
+- **Draft** (_editor draft_) — an unsaved artifact edit held in the
+  in-memory per-file draft store (3.5.9): write-through on keystrokes,
+  restored on open, keyed `chatId` + NUL + `path` with the disk content as
+  the dirty baseline. Session-scoped by design (hot-exit persistence is
+  backlog); the app-exit dialog counts drafts via a main-process mirror.
 - **Workspace root** (_workspace folder_) — the user-chosen directory that
   holds every chat's artifact directory; persisted as `workspaceRoot` in
   `settings.json`. The renderer reaches it only through the main-process FS
