@@ -504,7 +504,6 @@ function createWindow(): void {
           detail: 'Drafts live only in memory and are lost on exit.'
         })
         .then(({ response }) => {
-          exitDialogInFlight = false
           if (response === 0) {
             // Quit anyway: re-issue the close with the force flag.
             isQuiting = true
@@ -513,6 +512,11 @@ function createWindow(): void {
             // Aborted quit: a scheduled restart must not survive it.
             relaunchOnQuit = false
           }
+        })
+        // finally, not then: a rejected dialog promise must not wedge the
+        // in-flight flag and silently swallow every future close request.
+        .finally(() => {
+          exitDialogInFlight = false
         })
       return
     }
