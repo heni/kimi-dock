@@ -63,7 +63,7 @@ try {
     document.querySelector('webview')?.getAttribute('src')
   )
   console.log('[e2e] WebView src:', webviewSrc)
-  if (webviewSrc !== 'https://kimi.ai') throw new Error(`Unexpected webview src: ${webviewSrc}`)
+  if (webviewSrc !== 'https://www.kimi.ai') throw new Error(`Unexpected webview src: ${webviewSrc}`)
 
   await window.screenshot({ path: `${SHOTS}/01-main.png` })
 
