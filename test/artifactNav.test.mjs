@@ -1,6 +1,6 @@
 /*
- * Unit tests for the artifact-cycling arithmetic (extracted in 3.5.11 —
- * the cases the 3.5.8 review loop walked by hand, incl. its F01 off-by-one).
+ * Unit tests for the artifact-cycling arithmetic, incl. the not-in-list
+ * and wrap-around edge cases.
  * Run: npm run test:unit
  */
 import { test } from 'node:test'

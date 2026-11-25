@@ -1,13 +1,12 @@
 /*
- * Unit tests for the online-transition decision core (extracted in 3.5.11;
- * the 3.5.7 loop's F01 wedge and F09 spinner-stomp live here).
+ * Unit tests for the online-transition decision core.
  * Run: npm run test:unit
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import { decideOnlineTransition } from '../.tmp/unit-build/renderer/src/utils/transition.js'
 
-test('failed load with a live webview: re-drive it, spinner up (the F01 wedge)', () => {
+test('failed load with a live webview: re-drive it, spinner up', () => {
   assert.deepEqual(
     decideOnlineTransition({
       hasWebview: true,
@@ -17,7 +16,7 @@ test('failed load with a live webview: re-drive it, spinner up (the F01 wedge)',
     }),
     { isLoading: true, reload: true }
   )
-  // A failed POST-load navigation re-drives too (the F07 case).
+  // A failed POST-load navigation re-drives too.
   assert.deepEqual(
     decideOnlineTransition({
       hasWebview: true,
@@ -53,7 +52,7 @@ test('loaded SPA, no error: instant transition, nothing spins', () => {
   )
 })
 
-test('auto-retry in flight: leave the loading state alone (the F09 stomp)', () => {
+test('auto-retry in flight: leave the loading state alone', () => {
   assert.deepEqual(
     decideOnlineTransition({
       hasWebview: true,
@@ -74,5 +73,19 @@ test('error without a webview element: no reload possible, spinner follows first
       retryPending: false
     }),
     { isLoading: true, reload: false }
+  )
+})
+
+test('error dominates a pending retry: reload wins', () => {
+  // did-fail-load sets both loadError and the retry timer; the wedged
+  // error must still be re-driven, not deferred to the retry.
+  assert.deepEqual(
+    decideOnlineTransition({
+      hasWebview: true,
+      loadedOnce: false,
+      loadError: 'ERR_CONNECTION_REFUSED',
+      retryPending: true
+    }),
+    { isLoading: true, reload: true }
   )
 })

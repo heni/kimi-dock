@@ -6,7 +6,8 @@
 // Returns the path to open next, or null for a no-op (empty list, or the
 // only file is already open). `current` may be null (nothing open) or
 // missing from the list (deleted/renamed) — forward then opens the first
-// artifact, backward the last.
+// artifact, backward the last. Backward from the first position wraps to
+// the last.
 export function nextArtifactPath(
   paths: string[],
   current: string | null,

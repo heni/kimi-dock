@@ -1,6 +1,5 @@
-// The online-transition decision core (extracted from KimiWebView's
-// goOnline for testability — this logic produced two HIGH findings in the
-// 3.5.7 loop). Pure: the caller owns the side effects.
+// The online-transition decision core, extracted from KimiWebView's
+// goOnline for testability. Pure: the caller owns the side effects.
 
 export interface TransitionState {
   hasWebview: boolean
