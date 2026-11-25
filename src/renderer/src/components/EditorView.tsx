@@ -208,6 +208,21 @@ export default function EditorView({
         void runTriggerRef.current?.()
         return
       }
+      // Ctrl+Tab / Ctrl+Shift+Tab: cycle the chat's artifacts sequentially
+      // with wrap-around (no tabs/MRU here — the honest analog of VS Code's
+      // Ctrl+PageUp/Down). Routes through openFile, so the unsaved-changes
+      // confirm protects cycling exactly as it protects clicking.
+      if (event.ctrlKey && event.key === 'Tab') {
+        event.preventDefault()
+        if (files.length === 0) return
+        const paths = files.map((file) => file.path)
+        const idx = currentFile ? paths.indexOf(currentFile) : -1
+        const next = event.shiftKey
+          ? paths[(idx - 1 + paths.length) % paths.length]
+          : paths[(idx + 1) % paths.length]
+        if (next && next !== currentFile) void openFile(next)
+        return
+      }
       if (!isMarkdown(currentFile)) return
       if (event.ctrlKey && event.shiftKey && event.key === 'V') {
         event.preventDefault()
@@ -229,7 +244,7 @@ export default function EditorView({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [active, currentFile, saveCurrentFile])
+  }, [active, currentFile, saveCurrentFile, files, openFile])
 
   // Two-way scroll sync in split mode (ratio-based, loop-guarded).
   useEffect(() => {

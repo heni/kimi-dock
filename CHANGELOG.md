@@ -5,6 +5,17 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.5.8] - 2026-11-25
+
+### Added
+
+- **Artifact switching shortcuts** — Ctrl+Tab opens the next artifact of
+  the chat, Ctrl+Shift+Tab the previous one (sequential, wrap-around; the
+  honest analog of VS Code's Ctrl+PageUp/Down, since the editor has no
+  tabs or MRU set). Switching routes through the normal open path, so the
+  unsaved-changes confirmation protects cycling exactly as it protects
+  clicking. Listed in the F1 help panel and the README table.
+
 ## [3.5.7] - 2026-11-25
 
 ### Changed
