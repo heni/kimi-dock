@@ -443,16 +443,19 @@ export default function KimiWebView({
 
   // Copy the raw markdown source of an assistant answer through the
   // clipboard bridge; the ✓/✗ swap is the action's feedback (a silent
-  // no-op would violate the feedback rule).
+  // no-op would violate the feedback rule). Both settle paths re-arm the
+  // reset, so a stale timer from an earlier copy cannot wipe a fresh ✗.
+  const finishCopy = (id: string, ok: boolean): void => {
+    setCopyState({ id, ok })
+    if (copyResetRef.current) clearTimeout(copyResetRef.current)
+    copyResetRef.current = setTimeout(() => setCopyState(null), 1500)
+  }
+
   const handleCopyMessage = (msg: { id: string; content: string }): void => {
     void window.api
       ?.clipboardWrite('text', msg.content)
-      .then((result) => {
-        setCopyState({ id: msg.id, ok: !!result?.success })
-        if (copyResetRef.current) clearTimeout(copyResetRef.current)
-        copyResetRef.current = setTimeout(() => setCopyState(null), 1500)
-      })
-      .catch(() => setCopyState({ id: msg.id, ok: false }))
+      .then((result) => finishCopy(msg.id, !!result?.success))
+      .catch(() => finishCopy(msg.id, false))
   }
 
   useEffect(() => {
@@ -564,7 +567,13 @@ export default function KimiWebView({
                           className="copy-btn"
                           onClick={() => handleCopyMessage(msg)}
                           title="Copy answer (markdown source)"
-                          aria-label="Copy answer"
+                          aria-label={
+                            copyState?.id === msg.id
+                              ? copyState.ok
+                                ? 'Copied'
+                                : 'Copy failed'
+                              : 'Copy answer'
+                          }
                         >
                           {copyState?.id === msg.id ? (copyState.ok ? '✓' : '✗') : '⧉'}
                         </button>
