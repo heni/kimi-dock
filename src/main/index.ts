@@ -479,12 +479,15 @@ function createWindow(): void {
       return
     }
     // Unsaved editor drafts live only in the renderer's memory — exiting
-    // destroys them, so the exit asks first.
+    // destroys them, so the exit asks first: cancel the close, ask, and on
+    // "Quit" re-issue the close with the force flag. The dialog is
+    // parentless: a window-modal dialog on a close-prevented window was
+    // the suspected trigger of GNOME's "not responding" banner (3.5.9).
     if (!isQuiting && unsavedDraftCount > 0 && mainWindow) {
       event.preventDefault()
       const count = unsavedDraftCount
       void dialog
-        .showMessageBox(mainWindow, {
+        .showMessageBox({
           type: 'warning',
           buttons: ['Quit', 'Keep editing'],
           defaultId: 1,
@@ -495,6 +498,7 @@ function createWindow(): void {
         })
         .then(({ response }) => {
           if (response === 0) {
+            // Quit anyway: re-issue the close with the force flag.
             isQuiting = true
             mainWindow?.close()
           } else {
