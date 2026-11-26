@@ -79,6 +79,22 @@ test('list_artifacts caps the entry count', () => {
   assert.equal(result.truncated, true)
 })
 
+test('list_artifacts caps the total result size', () => {
+  const deep = Array.from({ length: 200 }, (_, i) => `${'d'.repeat(200)}/f${i}.txt`)
+  const result = dispatchRunHelpTool(deps({ listArtifacts: () => deep }), 'list_artifacts', '{}')
+  assert.ok(result.length <= 33 * 1024)
+  assert.match(result, /truncated/)
+})
+
+test('read_artifact returns the file content', () => {
+  const result = dispatchRunHelpTool(
+    deps({ readArtifact: () => 'package main' }),
+    'read_artifact',
+    '{"path":"main.go"}'
+  )
+  assert.equal(result, 'package main')
+})
+
 test('get_run_json returns null content when there is no run.json', () => {
   const result = JSON.parse(dispatchRunHelpTool(deps(), 'get_run_json', '{}'))
   assert.equal(result.content, null)
@@ -203,6 +219,31 @@ test('a tool round with content preserves it on the assistant message', async ()
   await runHelpLoop(streamRound, deps(), 'm', [{ role: 'user', content: 'hi' }])
   const assistantMsg = seen[1].messages[1]
   assert.equal(assistantMsg.content, 'Let me check.')
+})
+
+test('a round with parallel tool calls appends one assistant message and ordered results', async () => {
+  const seen = []
+  const streamRound = async (body) => {
+    seen.push(body)
+    if (seen.length === 1) {
+      return toolRound([
+        { id: 'c1', name: 'list_artifacts', arguments: '{}' },
+        { id: 'c2', name: 'get_run_json', arguments: '{}' }
+      ])
+    }
+    return contentRound('done')
+  }
+  await runHelpLoop(streamRound, deps(), 'm', [{ role: 'user', content: 'hi' }])
+  const round2 = seen[1].messages
+  assert.equal(round2.length, 4) // user + assistant + 2 tool results
+  assert.equal(round2[1].tool_calls.length, 2)
+  assert.deepEqual(
+    round2.slice(2).map((m) => [m.role, m.tool_call_id]),
+    [
+      ['tool', 'c1'],
+      ['tool', 'c2']
+    ]
+  )
 })
 
 test('the loop propagates round errors', async () => {

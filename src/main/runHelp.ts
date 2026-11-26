@@ -114,10 +114,13 @@ export function dispatchRunHelpTool(deps: RunHelpDeps, name: unknown, argsJson: 
       }
       case 'list_artifacts': {
         const files = deps.listArtifacts()
-        return JSON.stringify({
-          files: files.slice(0, LIST_MAX_ENTRIES),
-          truncated: files.length > LIST_MAX_ENTRIES
-        })
+        return cap(
+          JSON.stringify({
+            files: files.slice(0, LIST_MAX_ENTRIES),
+            truncated: files.length > LIST_MAX_ENTRIES
+          }),
+          TOOL_RESULT_MAX_CHARS
+        )
       }
       case 'get_run_json': {
         return cap(JSON.stringify({ content: deps.getRunJson() }), TOOL_RESULT_MAX_CHARS)
