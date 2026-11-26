@@ -934,6 +934,8 @@ async function runChatStream(
   sender.once('destroyed', onSenderDestroyed)
 
   try {
+    // The idle budget covers connect/first-byte too, not just the body phase.
+    armIdle()
     let accessToken = await ensureFreshAccessToken()
     if (!accessToken) {
       sendEvent({ type: 'error', message: 'Not logged in to Kimi account' })
@@ -977,6 +979,7 @@ async function runChatStream(
     const parser = createSseParser()
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
+    let sawDone = false
     const handleEvents = (events: { data: string }[]): boolean => {
       for (const event of events) {
         const classified = classifyStreamEvent(event.data)
@@ -986,13 +989,18 @@ async function runChatStream(
             break
           case 'error':
             sendEvent({ type: 'error', message: classified.message })
+            // Tear the connection down; the error event is already out, and
+            // this path returns without re-entering the catch.
+            stream.controller.abort()
             return false
           case 'toolCalls':
             console.warn('[API Stream] unexpected tool_calls delta (no tools sent)')
             break
+          case 'done':
+            sawDone = true
+            break
           case 'reasoning':
           case 'finish':
-          case 'done':
           case 'ignore':
             break
         }
@@ -1000,13 +1008,17 @@ async function runChatStream(
       return true
     }
 
-    armIdle()
     for (;;) {
       const { done, value } = await reader.read()
       if (done) break
       armIdle()
       if (!handleEvents(parser.feed(decoder.decode(value, { stream: true })))) return
+      if (sawDone) break
     }
+    // [DONE] is the terminator: cancel the tail instead of reading to EOF.
+    await reader.cancel().catch(() => {})
+    // Flush the decoder's partial multibyte char, then the parser's tail.
+    if (!handleEvents(parser.feed(decoder.decode()))) return
     if (!handleEvents(parser.end())) return
     sendEvent({ type: 'done', aborted: false })
   } catch (error) {

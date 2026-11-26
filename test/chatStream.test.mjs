@@ -114,3 +114,13 @@ test('unparseable data is ignored', () => {
 test('an empty choices array is ignored', () => {
   assert.deepEqual(classifyStreamEvent(JSON.stringify({ choices: [] })), { kind: 'ignore' })
 })
+
+test('an error payload without a message falls back to a generic one', () => {
+  const data = JSON.stringify({ error: { code: 'rate_limited' } })
+  assert.deepEqual(classifyStreamEvent(data), { kind: 'error', message: 'Stream error' })
+})
+
+test('a non-object JSON payload is ignored', () => {
+  assert.deepEqual(classifyStreamEvent('42'), { kind: 'ignore' })
+  assert.deepEqual(classifyStreamEvent('"x"'), { kind: 'ignore' })
+})

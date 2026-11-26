@@ -76,7 +76,11 @@ export default function KimiWebView({
   // accumulated text (events arrive outside React's render cycle);
   // streamingText is its render mirror, cleared when the reply persists.
   const [streamingText, setStreamingText] = useState('')
-  const streamRef = useRef<{ requestId: string; convId: string; text: string } | null>(null)
+  const streamRef = useRef<{ requestId: string; text: string } | null>(null)
+  // True from a stream's successful start until its outcome settles: the
+  // send button shows ■ stop only while there is a live stream to abort —
+  // the pass's prepare phase (queued, nothing to abort yet) shows ⏳ instead.
+  const [streamActive, setStreamActive] = useState(false)
   // One waiter per in-flight stream: the queue parks on the promise until
   // the done/error event for its requestId arrives.
   const streamWaitersRef = useRef<
@@ -305,7 +309,7 @@ export default function KimiWebView({
 
         const apiMessages = toApiMessages(current.messages)
         const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
-        streamRef.current = { requestId, convId: conversationId, text: '' }
+        streamRef.current = { requestId, text: '' }
         setStreamingText('')
         // Park before starting: the done/error event settles this promise.
         const outcomePromise = new Promise<{ aborted: boolean; text: string }>(
@@ -313,15 +317,22 @@ export default function KimiWebView({
             streamWaitersRef.current.set(requestId, { resolve, reject })
           }
         )
-        const startResult = await window.api?.kimiApiStreamStart?.({
-          requestId,
-          body: {
-            model,
-            messages: runSkillArmedRef.current
-              ? [{ role: 'system', content: RUN_JSON_SKILL }, ...apiMessages]
-              : apiMessages
-          }
-        })
+        let startResult: { success: boolean; error?: string } | undefined
+        try {
+          startResult = await window.api?.kimiApiStreamStart?.({
+            requestId,
+            body: {
+              model,
+              messages: runSkillArmedRef.current
+                ? [{ role: 'system', content: RUN_JSON_SKILL }, ...apiMessages]
+                : apiMessages
+            }
+          })
+        } catch (error) {
+          // A start that throws must not orphan the parked waiter.
+          streamWaitersRef.current.delete(requestId)
+          throw error
+        }
         if (!startResult?.success) {
           streamWaitersRef.current.delete(requestId)
           streamRef.current = null
@@ -333,10 +344,9 @@ export default function KimiWebView({
           failed = true
           break
         }
+        setStreamActive(true)
 
         const outcome = await outcomePromise
-        streamRef.current = null
-        setStreamingText('')
 
         // An empty completed reply is not a reply (abort is handled below).
         if (!outcome.aborted && outcome.text.length === 0) {
@@ -368,6 +378,12 @@ export default function KimiWebView({
         if (conversationRef.current?.id === conversationId) {
           setActiveConversation(next)
         }
+        // Cleared only after the persist above: same microtask → React
+        // batches, so the provisional bubble swaps to the persisted reply
+        // with no typing-indicator flash in between.
+        streamRef.current = null
+        setStreamingText('')
+        setStreamActive(false)
       }
     } catch (error) {
       setSendError({ convId: conversationId, message: (error as Error).message })
@@ -376,10 +392,11 @@ export default function KimiWebView({
       processingRef.current = false
       setIsGenerating(false)
       setQueueConvId(null)
-      // Safety net for the error path: a settled stream never leaks into
-      // the next pass (the normal paths clear this right after the outcome).
+      // Safety net for the error/break paths: a settled stream never leaks
+      // into the next pass (the normal path clears these at the pass's end).
       streamRef.current = null
       setStreamingText('')
+      setStreamActive(false)
       // Flushes dropped by the guard above wait in the set; hand the queue
       // to the next one — its own finally continues the chain. A failed
       // pass deletes only its own id: a persistent failure must not
@@ -759,7 +776,7 @@ export default function KimiWebView({
           value={inputValue}
           onChange={(e) => setInputValue(e.target.value)}
           onKeyDown={(e) => {
-            if (e.key === 'Enter' && !e.shiftKey) {
+            if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
               e.preventDefault()
               void handleSendMessage()
             }
@@ -772,13 +789,21 @@ export default function KimiWebView({
           rows={1}
         />
         <button
-          onClick={queueBusyHere ? handleStopGenerating : handleSendMessage}
-          disabled={!queueBusyHere && (!inputValue.trim() || !hasSession)}
+          onClick={streamActive ? handleStopGenerating : handleSendMessage}
+          disabled={!streamActive && (queueBusyHere || !inputValue.trim() || !hasSession)}
           className="send-btn"
-          aria-label={queueBusyHere ? 'Stop generating' : 'Send message'}
-          title={queueBusyHere ? 'Stop generating (the partial reply is kept)' : 'Send'}
+          aria-label={
+            streamActive ? 'Stop generating' : queueBusyHere ? 'Generating…' : 'Send message'
+          }
+          title={
+            streamActive
+              ? 'Stop generating (the partial reply is kept)'
+              : queueBusyHere
+                ? 'Generating…'
+                : 'Send'
+          }
         >
-          {queueBusyHere ? '■' : '➤'}
+          {streamActive ? '■' : queueBusyHere ? '⏳' : '➤'}
         </button>
       </div>
 
