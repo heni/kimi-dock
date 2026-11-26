@@ -704,7 +704,12 @@ export default function KimiWebView({
           </div>
         ) : (
           allMessages.map((msg) => (
-            <div key={msg.id} className={`message ${msg.role}`}>
+            <div
+              key={msg.id}
+              className={`message ${msg.role}`}
+              role="article"
+              aria-label={msg.role === 'user' ? 'user message' : 'assistant message'}
+            >
               <div className="message-avatar">{msg.role === 'user' ? '👤' : '🤖'}</div>
               <div className="message-content">
                 {msg.role === 'assistant' ? (
@@ -753,7 +758,7 @@ export default function KimiWebView({
         )}
 
         {queueBusyHere && streamingText.length > 0 && (
-          <div className="message assistant">
+          <div className="message assistant" role="article" aria-label="assistant message">
             <div className="message-avatar">🤖</div>
             <div className="message-content">
               <ChatMarkdown content={streamingText} />
