@@ -254,9 +254,14 @@ function App(): React.JSX.Element {
     toolsChatId: string
     text: string
   } | null>(null)
+  // Re-entry guard: a double-click must not append the trigger twice or
+  // mint two fresh chats. Cleared when the consume effect acknowledges.
+  const askAiInFlightRef = useRef(false)
 
   const handleAskAi = useCallback(
     (input: { chatId: string; text: string; newChat: boolean }) => {
+      if (askAiInFlightRef.current) return
+      askAiInFlightRef.current = true
       if (!isOffline) {
         void (async () => {
           try {
@@ -350,7 +355,10 @@ function App(): React.JSX.Element {
               runSkillArmed={runSkillArmed}
               onDisarmRunSkill={() => setRunSkillArmed(false)}
               runHelpTrigger={runHelpTrigger}
-              onRunHelpTriggerConsumed={() => setRunHelpTrigger(null)}
+              onRunHelpTriggerConsumed={() => {
+                askAiInFlightRef.current = false
+                setRunHelpTrigger(null)
+              }}
             />
           </div>
 

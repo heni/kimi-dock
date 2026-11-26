@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { buildRunHelpTrigger } from '../utils/runHelp'
+import { buildRunHelpTrigger, selectRunHelpContext, RunExit } from '../utils/runHelp'
 
 type ResolvedRun = {
   spec: { command: string; env?: Record<string, string>; cwd?: string; timeoutSec?: number }
@@ -65,13 +65,7 @@ export default function RunPanel({
   // Tagged with the file, command and source the run started with: a late
   // proc-exit after a file switch must not pair the new file's name with
   // the old file's run, and a post-run edit must not rewrite what ran.
-  const [lastExit, setLastExit] = useState<{
-    code: number | null
-    signal: string | null
-    file: string | null
-    command: string
-    source: 'builtin' | 'run-json' | 'free-form'
-  } | null>(null)
+  const [lastExit, setLastExit] = useState<RunExit | null>(null)
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
   const runningFileRef = useRef<string | null>(null)
@@ -244,24 +238,17 @@ export default function RunPanel({
   const handleAskAi = (event: React.MouseEvent): void => {
     if (!currentFile) return
     const useSpec = resolved && command.trim() === resolved.spec.command
-    // The trigger describes the run when there is one (in flight or
-    // exited): its own command and source, not the current line — a
-    // post-run edit must not rewrite what ran.
-    const running = runningId !== null
-    const triggerCommand = running
-      ? runningCommandRef.current
-      : (exitForFile?.command ?? command.trim())
-    const triggerSource = running
-      ? runningSourceRef.current
-      : (exitForFile?.source ?? (useSpec ? resolved.source : 'free-form'))
     onAskAi({
       text: buildRunHelpTrigger({
         file: currentFile,
-        command: triggerCommand,
-        source: triggerSource,
-        exitCode: exitForFile?.code ?? null,
-        signal: exitForFile?.signal ?? null,
-        running
+        ...selectRunHelpContext({
+          running: runningId !== null,
+          runningCtx: { command: runningCommandRef.current, source: runningSourceRef.current },
+          lastExit,
+          currentFile,
+          currentCommand: command.trim(),
+          currentSource: useSpec ? resolved.source : 'free-form'
+        })
       }),
       newChat: event.altKey
     })

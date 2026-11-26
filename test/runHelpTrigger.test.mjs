@@ -4,7 +4,10 @@
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { buildRunHelpTrigger } from '../.tmp/unit-build/renderer/src/utils/runHelp.js'
+import {
+  buildRunHelpTrigger,
+  selectRunHelpContext
+} from '../.tmp/unit-build/renderer/src/utils/runHelp.js'
 
 test('a failed run asks to diagnose it, with the command and its source', () => {
   const text = buildRunHelpTrigger({
@@ -91,4 +94,69 @@ test('an exit code wins over the running flag (branch precedence)', () => {
     running: true
   })
   assert.match(text, /^Объясни, что делает программа/)
+})
+
+// --- selectRunHelpContext ---
+
+const exit = (over = {}) => ({
+  code: 1,
+  signal: null,
+  file: 'a.py',
+  command: 'python a.py',
+  source: 'builtin',
+  ...over
+})
+
+test('mid-run: the running command/source, no exit — whatever the previous run was', () => {
+  const ctx = selectRunHelpContext({
+    running: true,
+    runningCtx: { command: 'python edited.py', source: 'free-form' },
+    lastExit: exit({ code: 0 }),
+    currentFile: 'a.py',
+    currentCommand: 'python edited.py',
+    currentSource: 'free-form'
+  })
+  assert.deepEqual(ctx, {
+    command: 'python edited.py',
+    source: 'free-form',
+    exitCode: null,
+    signal: null,
+    running: true
+  })
+})
+
+test('exited: the run’s own command and source, not the current line', () => {
+  const ctx = selectRunHelpContext({
+    running: false,
+    runningCtx: { command: '', source: 'free-form' },
+    lastExit: exit({ code: 2, command: 'python a.py', source: 'run-json' }),
+    currentFile: 'a.py',
+    currentCommand: 'python edited.py',
+    currentSource: 'free-form'
+  })
+  assert.deepEqual(ctx, {
+    command: 'python a.py',
+    source: 'run-json',
+    exitCode: 2,
+    signal: null,
+    running: false
+  })
+})
+
+test('no run for this file: the current line, no exit', () => {
+  const ctx = selectRunHelpContext({
+    running: false,
+    runningCtx: { command: '', source: 'free-form' },
+    lastExit: exit({ file: 'other.py' }),
+    currentFile: 'a.py',
+    currentCommand: 'python a.py',
+    currentSource: 'builtin'
+  })
+  assert.deepEqual(ctx, {
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: null,
+    signal: null,
+    running: false
+  })
 })

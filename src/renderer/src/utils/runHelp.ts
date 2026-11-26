@@ -39,3 +39,64 @@ export function buildRunHelpTrigger(input: RunHelpTriggerInput): string {
         : 'запуск ещё не выполнялся'
   return `Разберись с последним запуском \`${input.file}\`: ${outcome}, команда ${source}: ${command}`
 }
+
+// --- which run the trigger describes -----------------------------------------
+
+export interface RunExit {
+  code: number | null
+  signal: string | null
+  file: string | null
+  command: string
+  source: RunHelpTriggerInput['source']
+}
+
+export interface RunHelpContextInput {
+  running: boolean
+  runningCtx: { command: string; source: RunHelpTriggerInput['source'] }
+  lastExit: RunExit | null
+  currentFile: string | null
+  currentCommand: string
+  currentSource: RunHelpTriggerInput['source']
+}
+
+export interface RunHelpContext {
+  command: string
+  source: RunHelpTriggerInput['source']
+  exitCode: number | null
+  signal: string | null
+  running: boolean
+}
+
+// The trigger describes the run when one exists: mid-run → the running
+// command/source (an in-flight run has no exit yet, whatever the previous
+// one was); exited → the run's own tags (a post-run edit must not rewrite
+// what ran); no run for this file → the current line.
+export function selectRunHelpContext(input: RunHelpContextInput): RunHelpContext {
+  if (input.running) {
+    return {
+      command: input.runningCtx.command,
+      source: input.runningCtx.source,
+      exitCode: null,
+      signal: null,
+      running: true
+    }
+  }
+  const exitForFile =
+    input.lastExit && input.lastExit.file === input.currentFile ? input.lastExit : null
+  if (exitForFile) {
+    return {
+      command: exitForFile.command,
+      source: exitForFile.source,
+      exitCode: exitForFile.code,
+      signal: exitForFile.signal,
+      running: false
+    }
+  }
+  return {
+    command: input.currentCommand,
+    source: input.currentSource,
+    exitCode: null,
+    signal: null,
+    running: false
+  }
+}

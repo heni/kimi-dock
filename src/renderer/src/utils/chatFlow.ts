@@ -86,13 +86,19 @@ export function markSentSynced(
 // tool loop on every request (the marker carries the tools' chat directory,
 // which for a trigger sent to a fresh chat differs from the conversation's
 // own id); the one-shot skill rides only a pass whose pending set contains
-// a trigger.
+// a trigger. When several triggers accumulated, the LAST marker wins — the
+// latest ✨ expresses the current intent (an Alt+click-minted chat may grow
+// its own artifacts and get its own trigger later).
 export function runHelpPassInfo(
   messages: Message[],
   pending: Message[]
 ): { toolsChatId: string | undefined; skillThisPass: boolean } {
+  let toolsChatId: string | undefined
+  for (const message of messages) {
+    if (message.runHelp) toolsChatId = message.runHelp.chatId
+  }
   return {
-    toolsChatId: messages.find((m) => m.runHelp)?.runHelp?.chatId,
+    toolsChatId,
     skillThisPass: pending.some((m) => m.runHelp !== undefined)
   }
 }
