@@ -928,8 +928,10 @@ async function runChatStream(
       stream.controller.abort()
     }, STREAM_IDLE_TIMEOUT_MS)
   }
-  // A renderer reload mid-stream must not leave the fetch running (tokens
-  // cost quota); the stream belongs to the webContents that asked for it.
+  // A destroyed renderer (crash, window close) must not leave the fetch
+  // running (tokens cost quota). A plain reload is not covered — 'destroyed'
+  // does not fire on webContents.reload(); there the stream runs out with
+  // its events dropped by the reloaded renderer's requestId guard.
   const onSenderDestroyed = (): void => stream.controller.abort()
   sender.once('destroyed', onSenderDestroyed)
 
@@ -954,6 +956,8 @@ async function runChatStream(
 
     let response = await doFetch()
     if (response.status === 401) {
+      // Release the first response's socket before retrying.
+      await response.body?.cancel().catch(() => {})
       accessToken = await forceRefreshAccessToken()
       if (!accessToken) {
         sendEvent({ type: 'error', message: 'Session expired, please log in again' })

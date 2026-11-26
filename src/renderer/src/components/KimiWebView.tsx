@@ -615,6 +615,9 @@ export default function KimiWebView({
   // messages.
   const queueBusyHere =
     isGenerating && queueConvId !== null && queueConvId === activeConversation?.id
+  // The stop affordance is per-conversation like the bubble: viewing chat B
+  // while chat A's reply streams must not offer to abort A's stream.
+  const streamLiveHere = streamActive && queueBusyHere
   const visibleSendError =
     sendError && (sendError.convId === null || sendError.convId === activeConversation?.id)
       ? sendError
@@ -789,21 +792,21 @@ export default function KimiWebView({
           rows={1}
         />
         <button
-          onClick={streamActive ? handleStopGenerating : handleSendMessage}
-          disabled={!streamActive && (queueBusyHere || !inputValue.trim() || !hasSession)}
+          onClick={streamLiveHere ? handleStopGenerating : handleSendMessage}
+          disabled={!streamLiveHere && (queueBusyHere || !inputValue.trim() || !hasSession)}
           className="send-btn"
           aria-label={
-            streamActive ? 'Stop generating' : queueBusyHere ? 'Generating…' : 'Send message'
+            streamLiveHere ? 'Stop generating' : queueBusyHere ? 'Generating…' : 'Send message'
           }
           title={
-            streamActive
+            streamLiveHere
               ? 'Stop generating (the partial reply is kept)'
               : queueBusyHere
                 ? 'Generating…'
                 : 'Send'
           }
         >
-          {streamActive ? '■' : queueBusyHere ? '⏳' : '➤'}
+          {streamLiveHere ? '■' : queueBusyHere ? '⏳' : '➤'}
         </button>
       </div>
 

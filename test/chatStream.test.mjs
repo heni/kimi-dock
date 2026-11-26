@@ -115,6 +115,10 @@ test('an empty choices array is ignored', () => {
   assert.deepEqual(classifyStreamEvent(JSON.stringify({ choices: [] })), { kind: 'ignore' })
 })
 
+test('a null choice entry is ignored, not thrown on', () => {
+  assert.deepEqual(classifyStreamEvent(JSON.stringify({ choices: [null] })), { kind: 'ignore' })
+})
+
 test('an error payload without a message falls back to a generic one', () => {
   const data = JSON.stringify({ error: { code: 'rate_limited' } })
   assert.deepEqual(classifyStreamEvent(data), { kind: 'error', message: 'Stream error' })

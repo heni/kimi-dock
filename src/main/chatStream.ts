@@ -90,8 +90,9 @@ export function classifyStreamEvent(data: string): ClassifiedStreamEvent {
 
   const choices = record.choices
   if (!Array.isArray(choices) || choices.length === 0) return { kind: 'ignore' }
-  const choice = choices[0] as Record<string, unknown>
-  const delta = (choice.delta ?? {}) as Record<string, unknown>
+  const choice = choices[0]
+  if (choice === null || typeof choice !== 'object') return { kind: 'ignore' }
+  const delta = ((choice as Record<string, unknown>).delta ?? {}) as Record<string, unknown>
 
   if (typeof delta.content === 'string' && delta.content.length > 0) {
     return { kind: 'content', text: delta.content }
