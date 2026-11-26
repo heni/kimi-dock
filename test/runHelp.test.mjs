@@ -49,6 +49,28 @@ test('get_run_output returns the last run with capped tails', () => {
   assert.equal(result.stderrTail, 'go: go.mod file not found')
 })
 
+test('get_run_output reports a still-running process', () => {
+  const run = {
+    command: 'npm start',
+    exitCode: null,
+    signal: null,
+    stdoutTail: '',
+    stderrTail: '',
+    endedAt: null
+  }
+  const result = JSON.parse(
+    dispatchRunHelpTool(deps({ getLastRun: () => run }), 'get_run_output', '{}')
+  )
+  assert.equal(result.running, true)
+  assert.equal(result.exitCode, null)
+  assert.equal(result.source, 'unknown')
+})
+
+test('non-string arguments are ignored (empty args)', () => {
+  const result = JSON.parse(dispatchRunHelpTool(deps(), 'get_run_output', 42))
+  assert.match(result.error, /No runs recorded/)
+})
+
 test('read_artifact refuses a missing path argument', () => {
   const result = JSON.parse(dispatchRunHelpTool(deps(), 'read_artifact', '{}'))
   assert.match(result.error, /path must be a non-empty string/)
@@ -143,6 +165,14 @@ test('parallel calls assemble independently by index, ordered', () => {
 test('malformed fragments are skipped; a call without id stays id-less', () => {
   const calls = assembleToolCalls([null, 'junk', { index: 0, function: { name: 'a' } }])
   assert.deepEqual(calls, [{ id: '', name: 'a', arguments: '' }])
+})
+
+test('a fragment without an index joins call 0', () => {
+  const calls = assembleToolCalls([
+    { id: 'call_1', function: { name: 'a', arguments: '' } },
+    { function: { arguments: '{"x":1}' } }
+  ])
+  assert.deepEqual(calls, [{ id: 'call_1', name: 'a', arguments: '{"x":1}' }])
 })
 
 // --- runHelpLoop ---

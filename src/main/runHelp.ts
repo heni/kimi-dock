@@ -126,10 +126,13 @@ export function dispatchRunHelpTool(deps: RunHelpDeps, name: unknown, argsJson: 
         return cap(JSON.stringify({ content: deps.getRunJson() }), TOOL_RESULT_MAX_CHARS)
       }
       default:
-        return JSON.stringify({ error: `Unknown tool: ${String(name)}` })
+        return cap(
+          JSON.stringify({ error: `Unknown tool: ${String(name)}` }),
+          TOOL_RESULT_MAX_CHARS
+        )
     }
   } catch (error) {
-    return JSON.stringify({ error: (error as Error).message })
+    return cap(JSON.stringify({ error: (error as Error).message }), TOOL_RESULT_MAX_CHARS)
   }
 }
 

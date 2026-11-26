@@ -62,7 +62,7 @@ export function createSseParser(): SseParser {
 export type ClassifiedStreamEvent =
   | { kind: 'content'; text: string }
   | { kind: 'reasoning' }
-  | { kind: 'toolCalls'; calls: unknown[] }
+  | { kind: 'toolCalls'; calls: unknown[]; content?: string }
   | { kind: 'finish'; reason: string | null }
   | { kind: 'done' }
   | { kind: 'error'; message: string }
@@ -94,11 +94,19 @@ export function classifyStreamEvent(data: string): ClassifiedStreamEvent {
   if (choice === null || typeof choice !== 'object') return { kind: 'ignore' }
   const delta = ((choice as Record<string, unknown>).delta ?? {}) as Record<string, unknown>
 
+  if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
+    // A delta may carry both content and tool_calls: classify as toolCalls
+    // but keep the content, so neither is silently dropped.
+    return {
+      kind: 'toolCalls',
+      calls: delta.tool_calls,
+      ...(typeof delta.content === 'string' && delta.content.length > 0
+        ? { content: delta.content }
+        : {})
+    }
+  }
   if (typeof delta.content === 'string' && delta.content.length > 0) {
     return { kind: 'content', text: delta.content }
-  }
-  if (Array.isArray(delta.tool_calls) && delta.tool_calls.length > 0) {
-    return { kind: 'toolCalls', calls: delta.tool_calls }
   }
   if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
     return { kind: 'reasoning' }

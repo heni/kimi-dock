@@ -941,6 +941,12 @@ async function runChatStream(
           case 'error':
             throw new Error(classified.message)
           case 'toolCalls':
+            // A delta may carry content alongside the calls (lossless
+            // classification): forward it like any other content.
+            if (classified.content !== undefined) {
+              content += classified.content
+              sendEvent({ type: 'delta', content: classified.content })
+            }
             toolCallDeltas.push(...classified.calls)
             break
           case 'done':

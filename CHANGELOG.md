@@ -18,7 +18,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   and a per-chat last-run record teed off the run console (command,
   source level, exit code, capped stdout/stderr tails). The
   `kimi-api-stream-start` payload gains a validated `runHelp` field.
-  Covered by 17 new unit tests (dispatch, streamed tool_calls assembly,
+  Covered by 22 new unit tests (dispatch, streamed tool_calls assembly,
   the agent loop).
 
 ### Removed
