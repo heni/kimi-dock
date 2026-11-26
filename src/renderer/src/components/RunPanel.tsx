@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { buildRunHelpTrigger, selectRunHelpContext, RunExit } from '../utils/runHelp'
+import { hasDraft } from '../utils/draftStore'
 
 type ResolvedRun = {
   spec: { command: string; env?: Record<string, string>; cwd?: string; timeoutSec?: number }
@@ -241,6 +242,9 @@ export default function RunPanel({
     onAskAi({
       text: buildRunHelpTrigger({
         file: currentFile,
+        // The dirty flag tells the model up front that the buffer, not the
+        // disk, is the file's current truth (read_artifact returns it).
+        fileDirty: hasDraft(chatId, currentFile),
         ...selectRunHelpContext({
           // The ref, not the state: it is set before the save/start
           // round-trips, so a click in that window still sees the run.

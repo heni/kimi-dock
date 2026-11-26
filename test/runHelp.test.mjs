@@ -18,8 +18,26 @@ const deps = (overrides = {}) => ({
     throw new Error(`escape refused: ${relPath}`)
   },
   listArtifacts: () => [],
+  unsavedBuffers: () => [],
+  writeArtifact: (relPath) => {
+    throw new Error(`write refused: ${relPath}`)
+  },
   getRunJson: () => null,
   ...overrides
+})
+
+const diskRead = (content) => ({
+  content,
+  source: 'disk',
+  sizeBytes: Buffer.byteLength(content, 'utf8'),
+  mtimeMs: 1700000000000
+})
+
+const bufferRead = (content) => ({
+  content,
+  source: 'editor-buffer',
+  sizeBytes: Buffer.byteLength(content, 'utf8'),
+  mtimeMs: null
 })
 
 // --- dispatchRunHelpTool ---
@@ -84,11 +102,11 @@ test('read_artifact returns dep errors (escapes) as JSON content', () => {
 test('read_artifact caps oversized files', () => {
   const big = 'x'.repeat(20 * 1024)
   const result = dispatchRunHelpTool(
-    deps({ readArtifact: () => big }),
+    deps({ readArtifact: () => diskRead(big) }),
     'read_artifact',
     '{"path":"a.txt"}'
   )
-  assert.ok(result.length < 17 * 1024)
+  assert.ok(result.length < 17.5 * 1024)
   assert.match(result, /truncated, 20480 chars total/)
 })
 
@@ -108,13 +126,101 @@ test('list_artifacts caps the total result size', () => {
   assert.match(result, /truncated/)
 })
 
-test('read_artifact returns the file content', () => {
+test('list_artifacts reports which files have unsaved buffers', () => {
+  const result = JSON.parse(
+    dispatchRunHelpTool(
+      deps({ listArtifacts: () => ['a.txt', 'b.txt'], unsavedBuffers: () => ['b.txt'] }),
+      'list_artifacts',
+      '{}'
+    )
+  )
+  assert.deepEqual(result.files, ['a.txt', 'b.txt'])
+  assert.deepEqual(result.unsavedBuffers, ['b.txt'])
+})
+
+test('read_artifact returns the content under a disk header with size and mtime', () => {
   const result = dispatchRunHelpTool(
-    deps({ readArtifact: () => 'package main' }),
+    deps({ readArtifact: () => diskRead('package main') }),
     'read_artifact',
     '{"path":"main.go"}'
   )
-  assert.equal(result, 'package main')
+  const [header, ...rest] = result.split('\n')
+  assert.equal(
+    header,
+    `[main.go — on disk, 12 bytes, modified ${new Date(1700000000000).toISOString()}]`
+  )
+  assert.equal(rest.join('\n'), 'package main')
+})
+
+test('read_artifact marks an unsaved editor buffer in the header', () => {
+  const result = dispatchRunHelpTool(
+    deps({ readArtifact: () => bufferRead('draft bytes') }),
+    'read_artifact',
+    '{"path":"main.go"}'
+  )
+  const [header, ...rest] = result.split('\n')
+  assert.equal(header, '[main.go — unsaved editor buffer (differs from disk), 11 bytes]')
+  assert.equal(rest.join('\n'), 'draft bytes')
+})
+
+// --- write_artifact ---
+
+test('write_artifact returns the written byte count', () => {
+  const written = []
+  const result = JSON.parse(
+    dispatchRunHelpTool(
+      deps({
+        writeArtifact: (relPath, content) => {
+          written.push([relPath, content])
+          return { bytes: Buffer.byteLength(content, 'utf8') }
+        }
+      }),
+      'write_artifact',
+      '{"path":"src/fixed.go","content":"package main"}'
+    )
+  )
+  assert.deepEqual(result, { written: true, path: 'src/fixed.go', bytes: 12 })
+  assert.deepEqual(written, [['src/fixed.go', 'package main']])
+})
+
+test('write_artifact refuses a missing path or non-string content', () => {
+  const noPath = JSON.parse(dispatchRunHelpTool(deps(), 'write_artifact', '{"content":"x"}'))
+  assert.match(noPath.error, /path must be a non-empty string/)
+  const noContent = JSON.parse(dispatchRunHelpTool(deps(), 'write_artifact', '{"path":"a"}'))
+  assert.match(noContent.error, /content must be a string/)
+})
+
+test('write_artifact caps oversized content before touching the dep', () => {
+  let called = false
+  const result = JSON.parse(
+    dispatchRunHelpTool(
+      deps({
+        writeArtifact: () => {
+          called = true
+          return { bytes: 1 }
+        }
+      }),
+      'write_artifact',
+      JSON.stringify({ path: 'a.txt', content: 'x'.repeat(33 * 1024) })
+    )
+  )
+  assert.match(result.error, /content too large/)
+  assert.equal(called, false)
+})
+
+test('write_artifact returns dep refusals (unsaved buffer, escapes) as JSON content', () => {
+  const result = JSON.parse(
+    dispatchRunHelpTool(
+      deps({
+        writeArtifact: () => {
+          throw new Error("a.txt has unsaved changes in the user's editor")
+        }
+      }),
+      'write_artifact',
+      '{"path":"a.txt","content":"x"}'
+    )
+  )
+  assert.match(result.error, /unsaved changes/)
 })
 
 test('get_run_json returns null content when there is no run.json', () => {

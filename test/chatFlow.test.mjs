@@ -144,29 +144,22 @@ test('markSentSynced ignores assistant ids in the sent set', () => {
   assert.equal(m2.syncStatus, 'synced')
 })
 
-test('runHelpPassInfo: no marker → no tools, no skill', () => {
+test('runHelpPassInfo: no marker → no tools', () => {
   const conv = appendUserMessage(emptyConversation, { id: 'm1', content: 'hi', now: 200 })
-  assert.deepEqual(runHelpPassInfo(conv.messages, conv.messages), {
-    toolsChatId: undefined,
-    skillThisPass: false
-  })
+  assert.deepEqual(runHelpPassInfo(conv.messages), { toolsChatId: undefined })
 })
 
-test('runHelpPassInfo: trigger in the pending set → tools AND one-shot skill', () => {
+test('runHelpPassInfo: trigger present → tools (the skill rides every such pass)', () => {
   const conv = appendUserMessage(emptyConversation, {
     id: 'm1',
     content: 'trigger',
     now: 200,
     runHelp: { chatId: 'chat-7' }
   })
-  const pending = pendingUserMessages(conv)
-  assert.deepEqual(runHelpPassInfo(conv.messages, pending), {
-    toolsChatId: 'chat-7',
-    skillThisPass: true
-  })
+  assert.deepEqual(runHelpPassInfo(conv.messages), { toolsChatId: 'chat-7' })
 })
 
-test('runHelpPassInfo: delivered trigger → tools without the skill (follow-up pass)', () => {
+test('runHelpPassInfo: delivered trigger → tools on the follow-up pass too', () => {
   let conv = appendUserMessage(emptyConversation, {
     id: 'm1',
     content: 'trigger',
@@ -175,11 +168,7 @@ test('runHelpPassInfo: delivered trigger → tools without the skill (follow-up 
   })
   conv = applyAssistantReply(conv, ['m1'], { id: 'r1', content: 'A', now: 300 })
   conv = appendUserMessage(conv, { id: 'm2', content: 'follow-up', now: 400 })
-  const pending = pendingUserMessages(conv)
-  assert.deepEqual(runHelpPassInfo(conv.messages, pending), {
-    toolsChatId: 'chat-7',
-    skillThisPass: false
-  })
+  assert.deepEqual(runHelpPassInfo(conv.messages), { toolsChatId: 'chat-7' })
 })
 
 test('runHelpPassInfo: the last marker wins when several triggers exist', () => {
@@ -195,5 +184,5 @@ test('runHelpPassInfo: the last marker wins when several triggers exist', () => 
     now: 300,
     runHelp: { chatId: 'chat-9' }
   })
-  assert.equal(runHelpPassInfo(conv.messages, []).toolsChatId, 'chat-9')
+  assert.equal(runHelpPassInfo(conv.messages).toolsChatId, 'chat-9')
 })

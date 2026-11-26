@@ -48,6 +48,39 @@ export function resolveInWorkspace(root: string, relPath: string): string {
   return resolved
 }
 
+// Symlink-aware confinement for the model-driven run-help tools (the
+// cloud-bound reader/writer): the lexical guard does not stop a symlink
+// INSIDE the chat directory from pointing outside it. The lexical check
+// runs first; then the real path must stay under the root's real path.
+// Reads resolve the file itself (a missing file throws here, as it would
+// on read anyway); writes resolve the nearest existing ancestor — the
+// target may not exist yet — and the target itself when it does (an
+// existing symlink is followed and checked).
+export function resolveInWorkspaceReal(root: string, relPath: string, forWrite: boolean): string {
+  const abs = resolveInWorkspace(root, relPath)
+  const realRoot = fs.realpathSync(root)
+  const check = (candidate: string): void => {
+    if (candidate !== realRoot && !candidate.startsWith(realRoot + path.sep)) {
+      throw new Error(`Refused symlink escape outside the workspace: ${relPath}`)
+    }
+  }
+  if (!forWrite) {
+    check(fs.realpathSync(abs))
+    return abs
+  }
+  let cursor = abs
+  while (!fs.existsSync(cursor)) {
+    const parent = path.dirname(cursor)
+    if (parent === cursor) break // filesystem root reached — cannot happen under a root
+    cursor = parent
+  }
+  check(fs.realpathSync(cursor))
+  if (fs.existsSync(abs)) {
+    check(fs.realpathSync(abs))
+  }
+  return abs
+}
+
 const isHidden = (name: string): boolean => name.startsWith('.')
 
 // One directory level, dot-entries filtered, directories first then by name.

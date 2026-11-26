@@ -11,6 +11,7 @@ import {
 } from '../utils/chatFlow'
 import RUN_JSON_SKILL from '../../../../resources/skills/run-json/SKILL.md?raw'
 import RUN_HELP_SKILL from '../../../../resources/skills/run-help/SKILL.md?raw'
+import { collectRunHelpBuffers } from '../utils/runHelp'
 import LoadingSkeleton from './LoadingSkeleton'
 import { decideOnlineTransition } from '../utils/transition'
 import '../assets/KimiWebView.css'
@@ -372,10 +373,10 @@ export default function KimiWebView({
 
         const apiMessages = toApiMessages(current.messages)
         // AI run-help: a conversation holding a trigger gets the tool loop
-        // on every request (follow-ups keep tool access — the marker
-        // carries the tools' chat directory); the one-shot skill rides only
-        // the pass that delivers a trigger.
-        const { toolsChatId, skillThisPass } = runHelpPassInfo(current.messages, pending)
+        // AND the skill on every request — follow-ups keep tool access and
+        // the freshness rules (the API is stateless; the marker carries the
+        // tools' chat directory).
+        const { toolsChatId } = runHelpPassInfo(current.messages)
         const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
         streamRef.current = { requestId, text: '' }
         setStreamingText('')
@@ -395,14 +396,16 @@ export default function KimiWebView({
             body: {
               model,
               messages: [
-                ...(skillThisPass && !degraded
-                  ? [{ role: 'system', content: RUN_HELP_SKILL }]
-                  : []),
+                ...(toolsChatId && !degraded ? [{ role: 'system', content: RUN_HELP_SKILL }] : []),
                 ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : []),
                 ...apiMessages
               ]
             },
-            ...(toolsChatId && !degraded ? { runHelp: { chatId: toolsChatId } } : {})
+            // The buffers push makes the tools read the live editor drafts
+            // of this chat, not the stale disk — a fresh snapshot per pass.
+            ...(toolsChatId && !degraded
+              ? { runHelp: { chatId: toolsChatId, buffers: collectRunHelpBuffers(toolsChatId) } }
+              : {})
           })
         let startResult: { success: boolean; error?: string; code?: string } | undefined
         try {

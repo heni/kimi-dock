@@ -179,6 +179,19 @@ export default function EditorView({
     [activeChatId]
   )
 
+  // AI run-help writes land on disk while the user sits on the chat
+  // surface: refresh the artifact list, and reload the file when it is
+  // open. A draft always wins — openFile restores it instead of reading
+  // the disk, so a keystroke racing the write is never lost.
+  useEffect(() => {
+    const off = window.api?.onRunHelpArtifactWritten?.((payload) => {
+      if (!activeChatId || payload.chatId !== activeChatId) return
+      void refreshFiles()
+      if (payload.path === currentFileRef.current) void openFile(payload.path)
+    })
+    return off
+  }, [activeChatId, refreshFiles, openFile])
+
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
     const path = currentFile
