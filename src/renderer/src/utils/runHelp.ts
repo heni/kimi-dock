@@ -4,6 +4,11 @@
 // the record of what was asked (the model pulls the details itself via the
 // run-help tools); the wording follows the approved design doc.
 
+// The .js extension is deliberate: the unit-test build runs the compiled
+// output under Node ESM, which requires explicit extensions (vite and tsc
+// resolve it to the .ts source).
+import { dirtyPaths, getDraft } from './draftStore.js'
+
 export interface RunHelpTriggerInput {
   file: string // relative path inside the chat directory
   command: string
@@ -11,6 +16,7 @@ export interface RunHelpTriggerInput {
   exitCode: number | null // null: no run yet, or killed by a signal
   signal: string | null
   running?: boolean // a run is in flight right now
+  fileDirty?: boolean // the file has unsaved editor changes right now
 }
 
 const COMMAND_MAX_CHARS = 300
@@ -27,8 +33,13 @@ const capCommand = (command: string): string =>
 export function buildRunHelpTrigger(input: RunHelpTriggerInput): string {
   const command = `\`${capCommand(input.command)}\``
   const source = `(${SOURCE_LABELS[input.source]})`
+  // The dirty flag grounds the first answer: the model must analyze the
+  // buffer, not yesterday's disk (read_artifact returns the buffer).
+  const dirty = input.fileDirty
+    ? ' Файл сейчас имеет несохранённые изменения в редакторе — read_artifact вернёт актуальный буфер, а не диск.'
+    : ''
   if (input.exitCode === 0) {
-    return `Объясни, что делает программа в \`${input.file}\`. Последний запуск: exit 0, команда ${source}: ${command}`
+    return `Объясни, что делает программа в \`${input.file}\`. Последний запуск: exit 0, команда ${source}: ${command}${dirty}`
   }
   const outcome = input.running
     ? 'запущен и ещё выполняется'
@@ -37,7 +48,32 @@ export function buildRunHelpTrigger(input: RunHelpTriggerInput): string {
       : input.signal !== null
         ? `killed (${input.signal})`
         : 'запуск ещё не выполнялся'
-  return `Разберись с последним запуском \`${input.file}\`: ${outcome}, команда ${source}: ${command}`
+  return `Разберись с последним запуском \`${input.file}\`: ${outcome}, команда ${source}: ${command}${dirty}`
+}
+
+// --- unsaved buffers pushed with the request ---------------------------------
+
+// Caps on the buffer push — the same limits main enforces when parsing the
+// payload (RUN_HELP_BUFFER_* in src/main/index.ts); keep in sync. A draft
+// over the cap is skipped: that file's reads degrade to disk instead of
+// bricking the whole pass.
+export const RUN_HELP_BUFFER_MAX_ENTRIES = 64
+export const RUN_HELP_BUFFER_MAX_CHARS = 64 * 1024
+
+// The chat's unsaved editor drafts as { path: content }, sent at stream
+// start so the run-help tools read the live buffers instead of the stale
+// disk. Freshness is per pass: the next send pushes a new snapshot.
+export function collectRunHelpBuffers(chatId: string): Record<string, string> {
+  const buffers: Record<string, string> = {}
+  let count = 0
+  for (const path of dirtyPaths(chatId)) {
+    if (count >= RUN_HELP_BUFFER_MAX_ENTRIES) break
+    const draft = getDraft(chatId, path)
+    if (!draft || draft.content.length > RUN_HELP_BUFFER_MAX_CHARS) continue
+    buffers[path] = draft.content
+    count += 1
+  }
+  return buffers
 }
 
 // --- which run the trigger describes -----------------------------------------

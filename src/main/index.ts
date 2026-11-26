@@ -36,7 +36,9 @@ import {
   listFilesRecursive,
   readTextFile,
   writeTextFile,
-  resolveInWorkspace
+  resolveInWorkspace,
+  resolveInWorkspaceReal,
+  canonicalWorkspaceRel
 } from './workspace'
 import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
@@ -808,6 +810,12 @@ ipcMain.handle('import-conversations', async (_, data: unknown) => {
 // sees one ordinary (slower) streaming request.
 const STREAM_IDLE_TIMEOUT_MS = 120_000
 const STREAM_REQUEST_ID_MAX_LENGTH = 100
+// runHelp buffer push (the renderer's unsaved drafts at stream start): the
+// renderer applies the same caps when building the payload — keep in sync
+// with RUN_HELP_BUFFER_* in src/renderer/src/utils/runHelp.ts.
+const RUN_HELP_BUFFER_MAX_ENTRIES = 64
+const RUN_HELP_BUFFER_MAX_CHARS = 64 * 1024
+const RUN_HELP_BUFFER_KEY_MAX_CHARS = 512
 
 interface ActiveChatStream {
   controller: AbortController
@@ -827,7 +835,7 @@ async function runChatStream(
   sender: Electron.WebContents,
   requestId: string,
   body: Record<string, unknown>,
-  runHelp?: { chatId: string; chatDir: string }
+  runHelp?: { chatId: string; chatDir: string; buffers: Map<string, string> }
 ): Promise<void> {
   const stream: ActiveChatStream = {
     controller: new AbortController(),
@@ -993,16 +1001,61 @@ async function runChatStream(
     armIdle()
     if (runHelp) {
       const chatId = runHelp.chatId
+      const chatDir = runHelp.chatDir
+      // Buffer keys and tool paths canonicalize through the same lexical
+      // guard, so './src/x.go' and 'src/x.go' hit the same buffer entry.
+      const canonicalRel = (relPath: string): string => canonicalWorkspaceRel(chatDir, relPath)
       const deps: RunHelpDeps = {
         getLastRun: () => lastRunByChat.get(chatId) ?? null,
-        readArtifact: (relPath) => readTextFile(runHelp.chatDir, relPath),
-        listArtifacts: () => listFilesRecursive(runHelp.chatDir, '.').map((f) => f.path),
+        readArtifact: (relPath) => {
+          const rel = canonicalRel(relPath)
+          const buffer = runHelp.buffers.get(rel)
+          if (buffer !== undefined) {
+            // The unsaved editor buffer is the user's current truth.
+            return {
+              content: buffer,
+              source: 'editor-buffer',
+              sizeBytes: Buffer.byteLength(buffer, 'utf8'),
+              mtimeMs: null
+            }
+          }
+          const abs = resolveInWorkspaceReal(chatDir, rel, false)
+          const stat = fs.statSync(abs)
+          return {
+            content: readTextFile(chatDir, rel),
+            source: 'disk',
+            sizeBytes: stat.size,
+            mtimeMs: stat.mtimeMs
+          }
+        },
+        listArtifacts: () => listFilesRecursive(chatDir, '.').map((f) => f.path),
+        unsavedBuffers: () => [...runHelp.buffers.keys()],
+        writeArtifact: (relPath, content) => {
+          const rel = canonicalRel(relPath)
+          // Never write over the user's unsaved work: the refusal tells the
+          // model to ask for a save first (the draft always survives on the
+          // renderer side, but a disk write here would silently diverge).
+          if (runHelp.buffers.has(rel)) {
+            throw new Error(
+              `${rel} has unsaved changes in the user's editor. Ask the user to save (Ctrl+S) or discard them, then retry the write.`
+            )
+          }
+          resolveInWorkspaceReal(chatDir, rel, true)
+          writeTextFile(chatDir, rel, content)
+          // The editor surface reloads the file if it is open without a draft.
+          if (!sender.isDestroyed()) {
+            sender.send('run-help-artifact-written', { chatId, path: rel })
+          }
+          return { bytes: Buffer.byteLength(content, 'utf8') }
+        },
         getRunJson: () => {
           try {
-            return readTextFile(runHelp.chatDir, 'run.json')
+            resolveInWorkspaceReal(chatDir, 'run.json', false)
+            return readTextFile(chatDir, 'run.json')
           } catch (error) {
             // Only a missing run.json means "no run.json"; anything else
-            // (permissions, size, binary) is reported to the model.
+            // (permissions, size, binary, a symlink escape) is reported to
+            // the model.
             if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
             throw error
           }
@@ -1054,7 +1107,7 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
   }
   // AI run-help: the same endpoint with tools and a main-side agent loop.
   // chatId is validated and every tool is confined to that chat directory.
-  let runHelp: { chatId: string; chatDir: string } | undefined
+  let runHelp: { chatId: string; chatDir: string; buffers: Map<string, string> } | undefined
   if (payload.runHelp !== undefined) {
     if (!isRecord(payload.runHelp) || typeof payload.runHelp.chatId !== 'string') {
       return { success: false, error: 'Invalid runHelp payload' }
@@ -1063,20 +1116,44 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
       return { success: false, error: 'Invalid chat body' }
     }
     try {
-      runHelp = {
-        chatId: payload.runHelp.chatId,
-        chatDir: resolveChatDir(getWorkspaceRoot(), payload.runHelp.chatId)
-      }
+      const chatId = payload.runHelp.chatId
+      const chatDir = resolveChatDir(getWorkspaceRoot(), chatId)
       // Fail fast like proc-start: a missing chat dir would otherwise burn
       // agent rounds against dead tools. The code lets the renderer
       // degrade to a plain request instead of bricking the conversation.
-      if (!fs.existsSync(runHelp.chatDir) || !fs.statSync(runHelp.chatDir).isDirectory()) {
+      if (!fs.existsSync(chatDir) || !fs.statSync(chatDir).isDirectory()) {
         return {
           success: false,
           error: 'Chat directory does not exist',
           code: 'RUN_HELP_CHAT_DIR_MISSING'
         }
       }
+      // The unsaved editor buffers of this chat, pushed per pass so the
+      // tools read the user's current truth instead of the stale disk.
+      const buffers = new Map<string, string>()
+      if (payload.runHelp.buffers !== undefined) {
+        if (!isRecord(payload.runHelp.buffers)) {
+          return { success: false, error: 'Invalid runHelp payload' }
+        }
+        const entries = Object.entries(payload.runHelp.buffers)
+        if (entries.length > RUN_HELP_BUFFER_MAX_ENTRIES) {
+          return { success: false, error: 'Invalid runHelp payload' }
+        }
+        for (const [key, value] of entries) {
+          if (
+            typeof value !== 'string' ||
+            key.length === 0 ||
+            key.length > RUN_HELP_BUFFER_KEY_MAX_CHARS
+          ) {
+            return { success: false, error: 'Invalid runHelp payload' }
+          }
+          // An oversized draft degrades that file's reads to disk instead
+          // of bricking the whole pass.
+          if (value.length > RUN_HELP_BUFFER_MAX_CHARS) continue
+          buffers.set(canonicalWorkspaceRel(chatDir, key), value)
+        }
+      }
+      runHelp = { chatId, chatDir, buffers }
     } catch (error) {
       return { success: false, error: (error as Error).message }
     }

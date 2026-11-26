@@ -68,11 +68,12 @@ contextBridge.exposeInMainWorld('api', {
 
   // Streaming chat completions: the receive half of the offline chat's send
   // queue. Main forces stream:true and forwards content deltas as events.
-  // runHelp switches main to the tool-calling agent loop for that chat.
+  // runHelp switches main to the tool-calling agent loop for that chat;
+  // buffers carries the chat's unsaved editor drafts for this pass.
   kimiApiStreamStart: (payload: {
     requestId: string
     body: Record<string, unknown>
-    runHelp?: { chatId: string }
+    runHelp?: { chatId: string; buffers?: Record<string, string> }
   }): Promise<{ success: boolean; error?: string; code?: string }> =>
     ipcRenderer.invoke('kimi-api-stream-start', payload),
   kimiApiStreamAbort: (requestId: string): Promise<{ success: boolean; error?: string }> =>
@@ -88,6 +89,15 @@ contextBridge.exposeInMainWorld('api', {
     const listener = (_: IpcRendererEvent, event: unknown): void => callback(event as never)
     ipcRenderer.on('kimi-api-stream-event', listener)
     return () => ipcRenderer.removeListener('kimi-api-stream-event', listener)
+  },
+  // A run-help write_artifact landed on disk in a chat directory.
+  onRunHelpArtifactWritten: (
+    callback: (payload: { chatId: string; path: string }) => void
+  ): (() => void) => {
+    const listener = (_: IpcRendererEvent, payload: unknown): void =>
+      callback(payload as { chatId: string; path: string })
+    ipcRenderer.on('run-help-artifact-written', listener)
+    return () => ipcRenderer.removeListener('run-help-artifact-written', listener)
   },
 
   // Kimi Code OAuth (Device Authorization Grant)

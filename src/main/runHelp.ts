@@ -17,10 +17,30 @@ export interface LastRun {
   endedAt: number | null // null while the process is still running
 }
 
+// What read_artifact saw. The source matters: an unsaved editor buffer is
+// the user's current truth, the disk may lag it. mtimeMs is null for a
+// buffer (it has no on-disk time).
+export interface ArtifactRead {
+  content: string
+  source: 'disk' | 'editor-buffer'
+  sizeBytes: number
+  mtimeMs: number | null
+}
+
 export interface RunHelpDeps {
   getLastRun: () => LastRun | null
-  readArtifact: (relPath: string) => string // must throw on escapes/missing
+  // Must throw on escapes/missing. A path with an unsaved editor buffer
+  // resolves to the buffer, not the disk.
+  readArtifact: (relPath: string) => ArtifactRead
   listArtifacts: () => string[] // relative paths
+  // Relative paths with an unsaved editor buffer right now (pushed by the
+  // renderer at stream start).
+  unsavedBuffers: () => string[]
+  // Full-file create/overwrite inside the chat directory. Must throw on
+  // escapes and on files with unsaved editor buffers (the refusal text is
+  // model-facing: it says to ask the user to save first). Returns the
+  // written byte count.
+  writeArtifact: (relPath: string, content: string) => { bytes: number }
   getRunJson: () => string | null
 }
 
@@ -40,7 +60,7 @@ export const RUN_HELP_TOOLS = [
     function: {
       name: 'read_artifact',
       description:
-        'Read a file from this chat directory (source code, config). Paths are relative to the chat directory.',
+        'Read a file from this chat directory (source code, config). Paths are relative to the chat directory. The result starts with a header line naming the source — "on disk" or "unsaved editor buffer" — with the byte size and modification time; an unsaved buffer is the user\'s current truth when it differs from disk.',
       parameters: {
         type: 'object',
         properties: { path: { type: 'string', description: 'Relative file path' } },
@@ -51,8 +71,25 @@ export const RUN_HELP_TOOLS = [
   {
     type: 'function',
     function: {
+      name: 'write_artifact',
+      description:
+        "Write a file in this chat directory: full content, creates or overwrites. Confined to the chat directory. Refused while the file has unsaved changes in the user's editor — then ask the user to save (Ctrl+S) or discard them, and retry.",
+      parameters: {
+        type: 'object',
+        properties: {
+          path: { type: 'string', description: 'Relative file path' },
+          content: { type: 'string', description: 'Full new file content' }
+        },
+        required: ['path', 'content']
+      }
+    }
+  },
+  {
+    type: 'function',
+    function: {
       name: 'list_artifacts',
-      description: 'List the files in this chat directory (relative paths).',
+      description:
+        'List the files in this chat directory (relative paths), plus which of them have unsaved editor buffers.',
       parameters: { type: 'object', properties: {}, required: [] }
     }
   },
@@ -67,11 +104,22 @@ export const RUN_HELP_TOOLS = [
 ] as const
 
 const ARTIFACT_MAX_CHARS = 16 * 1024
+const WRITE_MAX_CHARS = 32 * 1024
 const TOOL_RESULT_MAX_CHARS = 32 * 1024
 const LIST_MAX_ENTRIES = 200
 
 const cap = (text: string, max: number): string =>
   text.length > max ? `${text.slice(0, max)}\n… [truncated, ${text.length} chars total]` : text
+
+// Grounding for the model's claims about what it sees: the header, not its
+// own arithmetic, is where byte counts and freshness come from.
+const readHeader = (path: string, read: ArtifactRead): string => {
+  if (read.source === 'editor-buffer') {
+    return `[${path} — unsaved editor buffer, ${read.sizeBytes} bytes]`
+  }
+  const modified = read.mtimeMs !== null ? `, modified ${new Date(read.mtimeMs).toISOString()}` : ''
+  return `[${path} — on disk, ${read.sizeBytes} bytes${modified}]`
+}
 
 // Tool errors are returned as JSON content, never thrown: the model reads
 // them and can correct itself (wrong path, no runs yet).
@@ -110,14 +158,31 @@ export function dispatchRunHelpTool(deps: RunHelpDeps, name: unknown, argsJson: 
         if (typeof args.path !== 'string' || args.path.length === 0) {
           return JSON.stringify({ error: 'path must be a non-empty string' })
         }
-        return cap(deps.readArtifact(args.path), ARTIFACT_MAX_CHARS)
+        const read = deps.readArtifact(args.path)
+        return `${readHeader(args.path, read)}\n${cap(read.content, ARTIFACT_MAX_CHARS)}`
+      }
+      case 'write_artifact': {
+        if (typeof args.path !== 'string' || args.path.length === 0) {
+          return JSON.stringify({ error: 'path must be a non-empty string' })
+        }
+        if (typeof args.content !== 'string') {
+          return JSON.stringify({ error: 'content must be a string' })
+        }
+        if (args.content.length > WRITE_MAX_CHARS) {
+          return JSON.stringify({
+            error: `content too large (${args.content.length} chars, cap ${WRITE_MAX_CHARS})`
+          })
+        }
+        const result = deps.writeArtifact(args.path, args.content)
+        return JSON.stringify({ written: true, path: args.path, bytes: result.bytes })
       }
       case 'list_artifacts': {
         const files = deps.listArtifacts()
         return cap(
           JSON.stringify({
             files: files.slice(0, LIST_MAX_ENTRIES),
-            truncated: files.length > LIST_MAX_ENTRIES
+            truncated: files.length > LIST_MAX_ENTRIES,
+            unsavedBuffers: deps.unsavedBuffers()
           }),
           TOOL_RESULT_MAX_CHARS
         )

@@ -58,11 +58,12 @@ declare global {
 
       // Streaming chat completions (offline chat): main forces stream:true
       // and forwards content deltas as kimi-api-stream-event messages.
-      // runHelp switches main to the tool-calling agent loop for that chat.
+      // runHelp switches main to the tool-calling agent loop for that chat;
+      // buffers carries the chat's unsaved editor drafts for this pass.
       kimiApiStreamStart: (payload: {
         requestId: string
         body: Record<string, unknown>
-        runHelp?: { chatId: string }
+        runHelp?: { chatId: string; buffers?: Record<string, string> }
       }) => Promise<{ success: boolean; error?: string; code?: string }>
       kimiApiStreamAbort: (requestId: string) => Promise<{ success: boolean; error?: string }>
       onKimiApiStreamEvent: (
@@ -72,6 +73,10 @@ declare global {
             | { requestId: string; type: 'done'; aborted: boolean; dispatched?: boolean }
             | { requestId: string; type: 'error'; message: string }
         ) => void
+      ) => () => void
+      // A run-help write_artifact landed on disk in a chat directory.
+      onRunHelpArtifactWritten: (
+        callback: (payload: { chatId: string; path: string }) => void
       ) => () => void
 
       // Kimi Code OAuth (Device Authorization Grant)

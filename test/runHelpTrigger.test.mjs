@@ -1,13 +1,19 @@
 /*
- * Unit tests for the AI run-help trigger builder (src/renderer/src/utils/runHelp.ts).
+ * Unit tests for the AI run-help renderer helpers
+ * (src/renderer/src/utils/runHelp.ts): the trigger builder, the run-context
+ * selector and the unsaved-buffers push.
  * Run: npm run test:unit
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 import {
   buildRunHelpTrigger,
-  selectRunHelpContext
+  selectRunHelpContext,
+  collectRunHelpBuffers,
+  RUN_HELP_BUFFER_MAX_ENTRIES,
+  RUN_HELP_BUFFER_MAX_CHARS
 } from '../.tmp/unit-build/renderer/src/utils/runHelp.js'
+import { setDraft, clearAllDrafts } from '../.tmp/unit-build/renderer/src/utils/draftStore.js'
 
 test('a failed run asks to diagnose it, with the command and its source', () => {
   const text = buildRunHelpTrigger({
@@ -94,6 +100,70 @@ test('an exit code wins over the running flag (branch precedence)', () => {
     running: true
   })
   assert.match(text, /^Объясни, что делает программа/)
+})
+
+test('a dirty file adds the buffer notice to the trigger', () => {
+  const text = buildRunHelpTrigger({
+    file: 'src/test.go',
+    command: 'go run src/test.go',
+    source: 'builtin',
+    exitCode: 1,
+    signal: null,
+    fileDirty: true
+  })
+  assert.match(text, /несохранённые изменения в редакторе/)
+  assert.match(text, /read_artifact вернёт актуальный буфер/)
+})
+
+test('a clean file adds no buffer notice (both branches)', () => {
+  const failed = buildRunHelpTrigger({
+    file: 'a.py',
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: 1,
+    signal: null
+  })
+  const ok = buildRunHelpTrigger({
+    file: 'a.py',
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: 0,
+    signal: null,
+    fileDirty: false
+  })
+  assert.doesNotMatch(failed, /несохранённые изменения/)
+  assert.doesNotMatch(ok, /несохранённые изменения/)
+})
+
+// --- collectRunHelpBuffers ---
+
+test('collectRunHelpBuffers returns only the chat’s own drafts', () => {
+  clearAllDrafts()
+  setDraft('c1', 'src/a.go', 'package main // edited', 'package main')
+  setDraft('c1', 'b.txt', 'draft b', 'disk b')
+  setDraft('c2', 'other.txt', 'other chat', 'x')
+  assert.deepEqual(collectRunHelpBuffers('c1'), {
+    'src/a.go': 'package main // edited',
+    'b.txt': 'draft b'
+  })
+  clearAllDrafts()
+})
+
+test('collectRunHelpBuffers skips drafts over the size cap', () => {
+  clearAllDrafts()
+  setDraft('c1', 'big.txt', 'x'.repeat(RUN_HELP_BUFFER_MAX_CHARS + 1), 'small')
+  setDraft('c1', 'ok.txt', 'fits', 'x')
+  assert.deepEqual(collectRunHelpBuffers('c1'), { 'ok.txt': 'fits' })
+  clearAllDrafts()
+})
+
+test('collectRunHelpBuffers caps the entry count', () => {
+  clearAllDrafts()
+  for (let i = 0; i < RUN_HELP_BUFFER_MAX_ENTRIES + 5; i++) {
+    setDraft('c1', `f${String(i).padStart(3, '0')}.txt`, `content ${i}`, '')
+  }
+  assert.equal(Object.keys(collectRunHelpBuffers('c1')).length, RUN_HELP_BUFFER_MAX_ENTRIES)
+  clearAllDrafts()
 })
 
 // --- selectRunHelpContext ---

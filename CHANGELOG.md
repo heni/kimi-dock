@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.0] - 2026-11-26
+
+### Added
+
+- **AI run-help reads the live editor buffers** — every request of a
+  run-help conversation pushes the chat's unsaved drafts to main, so
+  `read_artifact` returns the buffer the user is actually looking at
+  instead of the stale disk. Every read starts with a header line naming
+  the source ("on disk" / "unsaved editor buffer"), the byte size and the
+  modification time; `list_artifacts` names the files with unsaved
+  buffers; the ✨ trigger flags a dirty file up front.
+- **`write_artifact` tool** — the run-help assistant can create or
+  overwrite files inside the chat directory (full content, 32 K-char
+  cap). A write is refused while the target has unsaved editor changes —
+  the model asks for a save (Ctrl+S) and retries, so unsaved work is
+  never silently overwritten — and the open editor reloads a written
+  file automatically. All run-help tool paths, reads and writes alike,
+  are now confined by a symlink-aware (realpath) check on top of the
+  lexical one.
+
+### Changed
+
+- **The run-help skill rides every pass of a marked conversation** (was:
+  the trigger's request only) — the API is stateless, and follow-ups are
+  exactly where the model answered from stale memory of earlier reads.
+  The skill now carries the freshness contract (re-read in the current
+  turn before quoting; quote the header's size/mtime, never compute
+  them; never claim an unread re-read) and the actual run.json schema,
+  so the model stops inventing the format.
+
 ## [3.8.0] - 2026-11-26
 
 ### Added

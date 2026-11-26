@@ -168,8 +168,13 @@ export default function EditorView({
       const result = await window.api?.fsRead(`${activeChatId}/${path}`)
       if (result?.success && result.content !== undefined) {
         setCurrentFile(path)
-        setFileContent(result.content)
-        setSavedContent(result.content)
+        // A keystroke during the read lands in the draft store and is newer
+        // than the disk just read — the draft wins (the same post-await
+        // re-check saveCurrentFile does), otherwise the visible content
+        // would silently roll back to the disk.
+        const raced = getDraft(activeChatId, path)
+        setFileContent(raced ? raced.content : result.content)
+        setSavedContent(raced ? raced.base : result.content)
         setError(null)
         if (!isMarkdown(path)) setViewMode('edit')
       } else {
@@ -178,6 +183,19 @@ export default function EditorView({
     },
     [activeChatId]
   )
+
+  // AI run-help writes land on disk while the user sits on the chat
+  // surface: refresh the artifact list, and reload the file when it is
+  // open. A draft always wins — openFile restores it instead of reading
+  // the disk, so a keystroke racing the write is never lost.
+  useEffect(() => {
+    const off = window.api?.onRunHelpArtifactWritten?.((payload) => {
+      if (!activeChatId || payload.chatId !== activeChatId) return
+      void refreshFiles()
+      if (payload.path === currentFileRef.current) void openFile(payload.path)
+    })
+    return off
+  }, [activeChatId, refreshFiles, openFile])
 
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false

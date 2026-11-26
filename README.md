@@ -76,9 +76,12 @@
   chat via `run.json`, overridable ad hoc by editing the command line.
 - **✨ Ask AI** — one click asks the AI about the current file's last run
   in the chat that owns the artifacts: the model gets the run's command,
-  exit code and output through read-only tools and answers with the cause
-  and a minimal fix. Highlighted after a failed run; Alt+click asks in a
-  fresh conversation.
+  exit code and output, reads the chat's files **as you see them** (your
+  unsaved editor drafts are what it reads, marked as such), and can write
+  the fix into the chat directory itself — writes are refused while the
+  file has unsaved changes, and every path is confined to the chat
+  directory by a symlink-aware check. Highlighted after a failed run;
+  Alt+click asks in a fresh conversation.
 
 ### Clipboard bridge
 

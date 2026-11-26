@@ -69,17 +69,26 @@ Rules:
   is dropped in main (v1). _Not to be confused with:_ the webview
   surface's streaming — that is kimi.ai's own UI.
 - **AI run-help** (_run-help_) — the ✨ Ask AI feature line (design doc
-  2026-11-25; core 3.7.0, button 3.8.0): run-console diagnostics where
-  the model answers with read-only tool access to the chat directory.
-  Its main-side machinery is the **agent loop** (_tool loop_) — the
-  ≤6-iteration cycle of streamed requests with tools, dispatching
+  2026-11-25; core 3.7.0, button 3.8.0, context+writes 3.9.0): run-console
+  diagnostics where the model answers with tool access to the chat
+  directory. Its main-side machinery is the **agent loop** (_tool loop_) —
+  the ≤6-iteration cycle of streamed requests with tools, dispatching
   `role: tool` results between rounds (`src/main/runHelp.ts`) — and the
-  four **run-help tools** (`get_run_output`, `read_artifact`,
-  `list_artifacts`, `get_run_json`), every path confined to the chat
-  directory via the workspace guard. The button's **trigger message**
-  (_run-help trigger_) — the human-readable user message that starts a
-  run-help conversation pass («Разберись с последним запуском…», built
-  by `src/renderer/src/utils/runHelp.ts`); it carries the
+  five **run-help tools** (`get_run_output`, `read_artifact`,
+  `write_artifact`, `list_artifacts`, `get_run_json`), every path confined
+  to the chat directory by the lexical workspace guard plus a
+  symlink-aware (realpath) check. `write_artifact` (3.9.0) overwrites or
+  creates whole files and is refused while the target has unsaved editor
+  changes. Since 3.9.0 every pass pushes the chat's **unsaved editor
+  buffers** to main (`runHelp.buffers` at stream-start), so
+  `read_artifact` returns the buffer — the user's current truth — marked
+  in a header line with source, byte size and mtime; and the run-help
+  skill rides every pass of a marked conversation (sticky, not one-shot),
+  carrying the freshness contract and the run.json schema. The button's
+  **trigger message** (_run-help trigger_) — the human-readable user
+  message that starts a run-help conversation pass
+  («Разберись с последним запуском…», built by
+  `src/renderer/src/utils/runHelp.ts`); it carries the
   `Message.runHelp` marker that enables the tool loop for the whole
   conversation and names the tools' chat directory (the LAST marker
   wins when several accumulate).
