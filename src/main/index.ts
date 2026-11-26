@@ -11,7 +11,7 @@ import {
   session,
   Notification
 } from 'electron'
-import { join, resolve, sep, basename, dirname, isAbsolute, relative } from 'path'
+import { join, resolve, sep, basename, dirname, isAbsolute } from 'path'
 import fs from 'fs'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
 import icon from '../../resources/icon.png?asset'
@@ -37,7 +37,8 @@ import {
   readTextFile,
   writeTextFile,
   resolveInWorkspace,
-  resolveInWorkspaceReal
+  resolveInWorkspaceReal,
+  canonicalWorkspaceRel
 } from './workspace'
 import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
@@ -1003,8 +1004,7 @@ async function runChatStream(
       const chatDir = runHelp.chatDir
       // Buffer keys and tool paths canonicalize through the same lexical
       // guard, so './src/x.go' and 'src/x.go' hit the same buffer entry.
-      const canonicalRel = (relPath: string): string =>
-        relative(chatDir, resolveInWorkspace(chatDir, relPath))
+      const canonicalRel = (relPath: string): string => canonicalWorkspaceRel(chatDir, relPath)
       const deps: RunHelpDeps = {
         getLastRun: () => lastRunByChat.get(chatId) ?? null,
         readArtifact: (relPath) => {
@@ -1150,7 +1150,7 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
           // An oversized draft degrades that file's reads to disk instead
           // of bricking the whole pass.
           if (value.length > RUN_HELP_BUFFER_MAX_CHARS) continue
-          buffers.set(relative(chatDir, resolveInWorkspace(chatDir, key)), value)
+          buffers.set(canonicalWorkspaceRel(chatDir, key), value)
         }
       }
       runHelp = { chatId, chatDir, buffers }

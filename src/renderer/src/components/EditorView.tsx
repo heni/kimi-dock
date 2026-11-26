@@ -168,8 +168,13 @@ export default function EditorView({
       const result = await window.api?.fsRead(`${activeChatId}/${path}`)
       if (result?.success && result.content !== undefined) {
         setCurrentFile(path)
-        setFileContent(result.content)
-        setSavedContent(result.content)
+        // A keystroke during the read lands in the draft store and is newer
+        // than the disk just read — the draft wins (the same post-await
+        // re-check saveCurrentFile does), otherwise the visible content
+        // would silently roll back to the disk.
+        const raced = getDraft(activeChatId, path)
+        setFileContent(raced ? raced.content : result.content)
+        setSavedContent(raced ? raced.base : result.content)
         setError(null)
         if (!isMarkdown(path)) setViewMode('edit')
       } else {

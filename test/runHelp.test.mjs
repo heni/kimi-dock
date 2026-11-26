@@ -159,7 +159,7 @@ test('read_artifact marks an unsaved editor buffer in the header', () => {
     '{"path":"main.go"}'
   )
   const [header, ...rest] = result.split('\n')
-  assert.equal(header, '[main.go — unsaved editor buffer (differs from disk), 11 bytes]')
+  assert.equal(header, '[main.go — unsaved editor buffer, 11 bytes]')
   assert.equal(rest.join('\n'), 'draft bytes')
 })
 

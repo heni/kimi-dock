@@ -115,7 +115,7 @@ const cap = (text: string, max: number): string =>
 // own arithmetic, is where byte counts and freshness come from.
 const readHeader = (path: string, read: ArtifactRead): string => {
   if (read.source === 'editor-buffer') {
-    return `[${path} — unsaved editor buffer (differs from disk), ${read.sizeBytes} bytes]`
+    return `[${path} — unsaved editor buffer, ${read.sizeBytes} bytes]`
   }
   const modified = read.mtimeMs !== null ? `, modified ${new Date(read.mtimeMs).toISOString()}` : ''
   return `[${path} — on disk, ${read.sizeBytes} bytes${modified}]`

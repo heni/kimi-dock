@@ -53,9 +53,12 @@ export function resolveInWorkspace(root: string, relPath: string): string {
 // INSIDE the chat directory from pointing outside it. The lexical check
 // runs first; then the real path must stay under the root's real path.
 // Reads resolve the file itself (a missing file throws here, as it would
-// on read anyway); writes resolve the nearest existing ancestor — the
-// target may not exist yet — and the target itself when it does (an
-// existing symlink is followed and checked).
+// on read anyway). Writes cannot use existsSync for this: it FOLLOWS
+// links, so a dangling symlink as the final component would skip every
+// check while writeFileSync would happily follow it outside. The final
+// component is therefore unwrapped by hand (lstatSync sees the link
+// itself) down to the path the write would actually land on, and the
+// nearest EXISTING ancestor of that landing path is confined via realpath.
 export function resolveInWorkspaceReal(root: string, relPath: string, forWrite: boolean): string {
   const abs = resolveInWorkspace(root, relPath)
   const realRoot = fs.realpathSync(root)
@@ -68,17 +71,44 @@ export function resolveInWorkspaceReal(root: string, relPath: string, forWrite: 
     check(fs.realpathSync(abs))
     return abs
   }
-  let cursor = abs
+  // Unwrap the final component's symlink chain to the landing path (the
+  // file the write would create or overwrite). Intermediate components
+  // need no hand-unwrap: the ancestor realpath below resolves them.
+  let landing = abs
+  for (let depth = 0; ; depth++) {
+    let stat: fs.Stats
+    try {
+      stat = fs.lstatSync(landing)
+    } catch {
+      break // a missing component — the write lands here
+    }
+    if (!stat.isSymbolicLink()) break
+    if (depth >= 40) {
+      // The kernel's ELOOP limit; a longer chain is a loop or an attack.
+      throw new Error(`Too many levels of symbolic links: ${relPath}`)
+    }
+    const target = fs.readlinkSync(landing)
+    landing = path.isAbsolute(target) ? target : path.resolve(path.dirname(landing), target)
+  }
+  // Confine the nearest existing ancestor of the landing path: realpath
+  // resolves every symlink above it, so the whole chain is checked.
+  let cursor = landing
   while (!fs.existsSync(cursor)) {
     const parent = path.dirname(cursor)
     if (parent === cursor) break // filesystem root reached — cannot happen under a root
     cursor = parent
   }
   check(fs.realpathSync(cursor))
-  if (fs.existsSync(abs)) {
-    check(fs.realpathSync(abs))
-  }
   return abs
+}
+
+// Canonical workspace-relative form of a renderer/model-supplied path:
+// lexical resolve, then relative to the resolved root. Every comparison of
+// a tool path against a buffer key goes through this ONE function — drift
+// between separate canonicalizations would silently break the write-refusal
+// guard ('./x' and 'x' must be the same entry).
+export function canonicalWorkspaceRel(root: string, relPath: string): string {
+  return path.relative(path.resolve(root), resolveInWorkspace(root, relPath))
 }
 
 const isHidden = (name: string): boolean => name.startsWith('.')

@@ -8,7 +8,7 @@ import assert from 'node:assert/strict'
 import fs from 'node:fs'
 import os from 'node:os'
 import path from 'node:path'
-import { resolveInWorkspaceReal } from '../.tmp/unit-build/main/workspace.js'
+import { resolveInWorkspaceReal, canonicalWorkspaceRel } from '../.tmp/unit-build/main/workspace.js'
 
 // A scratch workspace: root/chat with a real file, plus an "outside"
 // directory that symlinks may point at.
@@ -101,6 +101,70 @@ test('lexical escapes are still refused before any symlink check', () => {
   try {
     assert.throws(() => resolveInWorkspaceReal(chat, '../x.txt', true), /outside the workspace/)
     assert.throws(() => resolveInWorkspaceReal(chat, '/etc/passwd', false), /absolute path/)
+  } finally {
+    cleanup(base)
+  }
+})
+
+// Regression: existsSync follows links, so a dangling final-component
+// symlink used to skip every check while writeFileSync followed it outside.
+test('write: a dangling symlink to an OUTSIDE missing file is refused', () => {
+  const { base, chat, outside } = setup()
+  try {
+    fs.symlinkSync(path.join(outside, 'missing.txt'), path.join(chat, 'link.txt'))
+    assert.throws(() => resolveInWorkspaceReal(chat, 'link.txt', true), /symlink escape/)
+  } finally {
+    cleanup(base)
+  }
+})
+
+test('write: a dangling symlink to an INSIDE missing file is allowed', () => {
+  const { base, chat } = setup()
+  try {
+    fs.symlinkSync(path.join(chat, 'sub', 'missing.txt'), path.join(chat, 'link.txt'))
+    assert.equal(resolveInWorkspaceReal(chat, 'link.txt', true), path.join(chat, 'link.txt'))
+  } finally {
+    cleanup(base)
+  }
+})
+
+test('write: a two-level chain link -> link2 -> outside-missing is refused', () => {
+  const { base, chat, outside } = setup()
+  try {
+    fs.symlinkSync(path.join(outside, 'missing.txt'), path.join(chat, 'link2.txt'))
+    fs.symlinkSync(path.join(chat, 'link2.txt'), path.join(chat, 'link.txt'))
+    assert.throws(() => resolveInWorkspaceReal(chat, 'link.txt', true), /symlink escape/)
+  } finally {
+    cleanup(base)
+  }
+})
+
+// One canonicalization for buffer keys and tool paths: './x' and 'x' must
+// hit the same entry, or the write-refusal guard silently misses.
+test('canonicalWorkspaceRel: ./x and x canonicalize to the same key', () => {
+  const { base, chat } = setup()
+  try {
+    assert.equal(canonicalWorkspaceRel(chat, './x'), 'x')
+    assert.equal(canonicalWorkspaceRel(chat, 'x'), 'x')
+    assert.equal(canonicalWorkspaceRel(chat, './x'), canonicalWorkspaceRel(chat, 'x'))
+  } finally {
+    cleanup(base)
+  }
+})
+
+test('canonicalWorkspaceRel: a/../x canonicalizes to x', () => {
+  const { base, chat } = setup()
+  try {
+    assert.equal(canonicalWorkspaceRel(chat, 'a/../x'), 'x')
+  } finally {
+    cleanup(base)
+  }
+})
+
+test('canonicalWorkspaceRel: an escape key throws', () => {
+  const { base, chat } = setup()
+  try {
+    assert.throws(() => canonicalWorkspaceRel(chat, '../x'), /outside the workspace/)
   } finally {
     cleanup(base)
   }
