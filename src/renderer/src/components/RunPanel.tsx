@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { buildRunHelpTrigger } from '../utils/runHelp'
 
 type ResolvedRun = {
   spec: { command: string; env?: Record<string, string>; cwd?: string; timeoutSec?: number }
@@ -15,6 +16,10 @@ interface RunPanelProps {
   saveCurrentFile: () => Promise<boolean>
   // EditorView's surface-level Ctrl+F5 fires whatever is registered here.
   registerRun?: (fn: (() => Promise<void>) | null) => void
+  hasSession: boolean
+  // ✨ Ask AI: the trigger text plus whether to ask in a fresh chat
+  // (Alt+click) instead of the artifact's own chat.
+  onAskAi: (input: { text: string; newChat: boolean }) => void
 }
 
 interface OutputChunk {
@@ -46,7 +51,9 @@ export default function RunPanel({
   skillArmed,
   onToggleSkill,
   saveCurrentFile,
-  registerRun
+  registerRun,
+  hasSession,
+  onAskAi
 }: RunPanelProps): React.JSX.Element {
   const [resolved, setResolved] = useState<ResolvedRun | null>(null)
   const [runJsonError, setRunJsonError] = useState<string | null>(null)
@@ -54,6 +61,10 @@ export default function RunPanel({
   const [chunks, setChunks] = useState<OutputChunk[]>([])
   const [runningId, setRunningId] = useState<string | null>(null)
   const [exitInfo, setExitInfo] = useState<string | null>(null)
+  // Structured twin of exitInfo for the ✨ trigger (exit code vs signal).
+  const [lastExit, setLastExit] = useState<{ code: number | null; signal: string | null } | null>(
+    null
+  )
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
   const outputRef = useRef<HTMLDivElement | null>(null)
@@ -61,6 +72,7 @@ export default function RunPanel({
   // Resolve the command for the current file; prefill the editable command.
   useEffect(() => {
     setExitInfo(null)
+    setLastExit(null)
     if (!currentFile) {
       setResolved(null)
       setRunJsonError(null)
@@ -94,6 +106,7 @@ export default function RunPanel({
     setHistory(loadHistory(chatId))
     setChunks([])
     setExitInfo(null)
+    setLastExit(null)
   }, [chatId])
 
   // Process events, filtered to the run this panel started.
@@ -114,6 +127,7 @@ export default function RunPanel({
       if (event.id !== runningIdRef.current) return
       runningIdRef.current = null
       setRunningId(null)
+      setLastExit({ code: event.code, signal: event.signal })
       setExitInfo(
         event.code !== null ? `exit ${event.code}` : `killed (${event.signal ?? 'signal'})`
       )
@@ -161,14 +175,17 @@ export default function RunPanel({
 
     setChunks([])
     setExitInfo(null)
+    setLastExit(null)
     // The resolved spec's extras (env/cwd/timeoutSec) apply only while the
     // command is the resolved one; an edited command is free-form.
     const useSpec = resolved && cmd === resolved.spec.command
+    const source = useSpec ? resolved.source : 'free-form'
     let result
     try {
       result = await window.api?.procStart({
         chatId,
         command: cmd,
+        source,
         ...(useSpec && resolved.spec.env ? { env: resolved.spec.env } : {}),
         ...(useSpec && resolved.spec.cwd ? { cwd: resolved.spec.cwd } : {}),
         ...(useSpec && resolved.spec.timeoutSec ? { timeoutSec: resolved.spec.timeoutSec } : {})
@@ -198,6 +215,30 @@ export default function RunPanel({
     if (runningIdRef.current) void window.api?.procStop(runningIdRef.current)
   }
 
+  // ✨ Ask AI: diagnose the last run (or explain the program) in the chat.
+  // Alt+click asks in a fresh chat instead of the artifact's own one.
+  const handleAskAi = (event: React.MouseEvent): void => {
+    if (!currentFile) return
+    const useSpec = resolved && command.trim() === resolved.spec.command
+    onAskAi({
+      text: buildRunHelpTrigger({
+        file: currentFile,
+        command: command.trim(),
+        source: useSpec ? resolved.source : 'free-form',
+        exitCode: lastExit?.code ?? null,
+        signal: lastExit?.signal ?? null
+      }),
+      newChat: event.altKey
+    })
+  }
+
+  const askDisabled = !hasSession || !currentFile
+  const askTitle = !hasSession
+    ? 'Log in with your Kimi account (Settings → Kimi Account) to ask AI'
+    : !currentFile
+      ? 'Open a file to ask about it'
+      : 'Ask AI about this run in the chat (Alt+click: in a new chat)'
+
   return (
     <div className="run-panel">
       <div className="run-panel-header">
@@ -207,6 +248,15 @@ export default function RunPanel({
             {resolved.source === 'run-json' ? `run.json: ${resolved.matchedGlob}` : 'built-in'}
           </span>
         )}
+        <button
+          className={`run-ask-btn${lastExit && lastExit.code !== 0 ? ' attention' : ''}`}
+          onClick={handleAskAi}
+          disabled={askDisabled}
+          title={askTitle}
+          aria-label="Ask AI about this run"
+        >
+          ✨ Ask AI
+        </button>
         <button
           className={`run-skill-btn${skillArmed ? ' armed' : ''}`}
           onClick={onToggleSkill}

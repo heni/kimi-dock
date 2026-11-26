@@ -5,6 +5,25 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.8.0] - 2026-11-26
+
+### Added
+
+- **✨ Ask AI in the run console** — one click asks the AI about the
+  current file's last run in the chat that owns the artifacts (Alt+click:
+  in a fresh conversation). The trigger message stays in the history; the
+  model answers through the tool-calling agent loop — the run's command,
+  exit code and output tails, the chat's files and its run.json are
+  available to it read-only — and the answer streams. Follow-up questions
+  in the same conversation keep tool access; the run-help skill rides
+  only the trigger's request. The button highlights after a failed run
+  and is disabled with an explaining tooltip when logged out. If the
+  offline chat is not visible (online and not forced), asking flips the
+  persisted force-offline flag on — the title-bar badge shows it, one
+  click flips back.
+- The run console reports the command's source level (built-in /
+  run.json / free-form) to the run-help tools.
+
 ## [3.7.0] - 2026-11-26
 
 ### Added

@@ -66,6 +66,20 @@
   searchable without network. Sending messages requires network (they go
   through the Kimi Code API).
 
+### Artifact editor and run console
+
+- **Artifacts per chat** — every conversation has a directory in the
+  workspace folder; the editor surface edits those files (CodeMirror,
+  markdown preview with split, in-memory drafts).
+- **Run console** — run the current file (`/bin/bash -c`, streamed output,
+  no stdin); the command resolves from a built-in table, overridable per
+  chat via `run.json`, overridable ad hoc by editing the command line.
+- **✨ Ask AI** — one click asks the AI about the current file's last run
+  in the chat that owns the artifacts: the model gets the run's command,
+  exit code and output through read-only tools and answers with the cause
+  and a minimal fix. Highlighted after a failed run; Alt+click asks in a
+  fresh conversation.
+
 ### Clipboard bridge
 
 - Renderer code can read the system clipboard as **plain text, native HTML,

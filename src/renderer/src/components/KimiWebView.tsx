@@ -9,6 +9,7 @@ import {
   toApiMessages
 } from '../utils/chatFlow'
 import RUN_JSON_SKILL from '../../../../resources/skills/run-json/SKILL.md?raw'
+import RUN_HELP_SKILL from '../../../../resources/skills/run-help/SKILL.md?raw'
 import LoadingSkeleton from './LoadingSkeleton'
 import { decideOnlineTransition } from '../utils/transition'
 import '../assets/KimiWebView.css'
@@ -43,6 +44,11 @@ interface KimiWebViewProps {
   onOpenArtifacts: (conversation: Conversation) => void
   runSkillArmed: boolean
   onDisarmRunSkill: () => void
+  // ✨ Ask AI: a trigger to append and send. targetChatId null mints a
+  // fresh conversation; toolsChatId is the artifact's chat the run-help
+  // tools are confined to. Consumed exactly once (the callback clears it).
+  runHelpTrigger: { targetChatId: string | null; toolsChatId: string; text: string } | null
+  onRunHelpTriggerConsumed: () => void
 }
 
 export default function KimiWebView({
@@ -54,7 +60,9 @@ export default function KimiWebView({
   onAuthRequired,
   onOpenArtifacts,
   runSkillArmed,
-  onDisarmRunSkill
+  onDisarmRunSkill,
+  runHelpTrigger,
+  onRunHelpTriggerConsumed
 }: KimiWebViewProps): React.JSX.Element {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
     navigator.onLine ? 'online' : 'offline'
@@ -160,6 +168,43 @@ export default function KimiWebView({
   useEffect(() => {
     conversationRef.current = activeConversation
   }, [activeConversation])
+
+  // ✨ Ask AI: append the trigger and send it through the ordinary queue.
+  // The trigger carries the runHelp marker, which enables the tool loop
+  // for this conversation and names the tools' chat directory. Consumed
+  // exactly once — the callback clears the App-level state up front, so a
+  // re-render cannot append the same trigger twice.
+  useEffect(() => {
+    if (!runHelpTrigger) return
+    onRunHelpTriggerConsumed()
+    void (async () => {
+      const now = Date.now()
+      const next = await withRecordLock(async () => {
+        const stored = runHelpTrigger.targetChatId
+          ? await offlineManager.getConversation(runHelpTrigger.targetChatId)
+          : null
+        const base: Conversation = stored ?? {
+          id: now.toString(),
+          title: '',
+          messages: [],
+          createdAt: now,
+          updatedAt: now,
+          isOffline: true
+        }
+        const updated = appendUserMessage(base, {
+          id: now.toString(),
+          content: runHelpTrigger.text,
+          now,
+          runHelp: { chatId: runHelpTrigger.toolsChatId }
+        })
+        await offlineManager.saveConversation(updated)
+        return updated
+      })
+      setActiveConversation(next)
+      setSendError(null)
+      void processQueue(next.id)
+    })()
+  }, [runHelpTrigger])
 
   // The armed run.json skill rides every request as a system message
   // (request-only, never persisted); the ref keeps the serial queue's
@@ -312,6 +357,16 @@ export default function KimiWebView({
         }
 
         const apiMessages = toApiMessages(current.messages)
+        // AI run-help: a conversation holding a trigger gets the tool loop
+        // on every request (follow-ups keep tool access — the marker
+        // carries the tools' chat directory); the one-shot skill rides only
+        // the pass that delivers a trigger.
+        const toolsChatId = current.messages.find((m) => m.runHelp)?.runHelp?.chatId
+        const triggerThisPass = pending.some((m) => m.runHelp !== undefined)
+        const systemMessages = [
+          ...(triggerThisPass ? [{ role: 'system', content: RUN_HELP_SKILL }] : []),
+          ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : [])
+        ]
         const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
         streamRef.current = { requestId, text: '' }
         setStreamingText('')
@@ -329,10 +384,9 @@ export default function KimiWebView({
             requestId,
             body: {
               model,
-              messages: runSkillArmedRef.current
-                ? [{ role: 'system', content: RUN_JSON_SKILL }, ...apiMessages]
-                : apiMessages
-            }
+              messages: [...systemMessages, ...apiMessages]
+            },
+            ...(toolsChatId ? { runHelp: { chatId: toolsChatId } } : {})
           })
         } catch (error) {
           // A start that throws must not orphan the parked waiter.

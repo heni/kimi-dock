@@ -56,6 +56,12 @@ export default function HelpModal({ isOpen, onClose }: HelpModalProps): React.JS
 
         <h2>Buttons worth knowing</h2>
         <p>
+          <strong>✨ Ask AI</strong> (run console) — asks the AI about the current file&apos;s last
+          run in this chat&apos;s conversation: the answer streams in with the run&apos;s command,
+          exit code and output already available to the model. Highlighted after a failed run.
+          Alt+click asks in a fresh conversation instead. Needs a logged-in Kimi account.
+        </p>
+        <p>
           <strong>AI: run.json</strong> (run console) — arms the run.json assistant: while armed,
           your offline-chat messages carry the run.json authoring instructions, so the AI can write
           or fix this chat&apos;s run.json. The chat header shows the armed chip; click either to

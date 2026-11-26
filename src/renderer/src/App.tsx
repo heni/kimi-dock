@@ -243,6 +243,52 @@ function App(): React.JSX.Element {
     })
   }, [currentConversation])
 
+  // ✨ Ask AI (run panel): hand the trigger to the offline chat of the
+  // artifact's own conversation — or of a freshly minted one (Alt+click).
+  // The chat lives behind the offline view: when it is not visible
+  // (online and not forced), the persisted force-offline flag flips on
+  // through the same settings path as the title-bar toggle — the badge
+  // shows the state and one click flips back.
+  const [runHelpTrigger, setRunHelpTrigger] = useState<{
+    targetChatId: string | null
+    toolsChatId: string
+    text: string
+  } | null>(null)
+
+  const handleAskAi = useCallback(
+    (input: { chatId: string; text: string; newChat: boolean }) => {
+      if (!isOffline) {
+        void (async () => {
+          try {
+            const settings = (await window.api?.getSettings?.()) || {}
+            if (!settings.forceOfflineMode) {
+              await window.api?.saveSettings?.({ ...settings, forceOfflineMode: true })
+            }
+          } catch (error) {
+            console.error('[App] Failed to force offline for Ask AI:', error)
+          }
+        })()
+      }
+      if (input.newChat) {
+        setCurrentConversation(null)
+      } else {
+        void offlineManager
+          .getConversation(input.chatId)
+          .then((conversation) => {
+            if (conversation) setCurrentConversation(conversation)
+          })
+          .catch(() => {})
+      }
+      setSurface('chat')
+      setRunHelpTrigger({
+        targetChatId: input.newChat ? null : input.chatId,
+        toolsChatId: input.chatId,
+        text: input.text
+      })
+    },
+    [isOffline]
+  )
+
   return (
     <ErrorBoundary>
       <div
@@ -290,6 +336,8 @@ function App(): React.JSX.Element {
               onOpenArtifacts={handleOpenArtifacts}
               runSkillArmed={runSkillArmed}
               onDisarmRunSkill={() => setRunSkillArmed(false)}
+              runHelpTrigger={runHelpTrigger}
+              onRunHelpTriggerConsumed={() => setRunHelpTrigger(null)}
             />
           </div>
 
@@ -310,6 +358,8 @@ function App(): React.JSX.Element {
                 skillArmed={runSkillArmed}
                 onToggleSkill={() => setRunSkillArmed((armed) => !armed)}
                 onChatSelected={setEditorChatId}
+                hasSession={hasSession}
+                onAskAi={handleAskAi}
               />
             </div>
           )}

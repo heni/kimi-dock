@@ -160,6 +160,7 @@ contextBridge.exposeInMainWorld('api', {
   procStart: (payload: {
     chatId: string
     command: string
+    source?: string
     env?: Record<string, string>
     cwd?: string
     timeoutSec?: number

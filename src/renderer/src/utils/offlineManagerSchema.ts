@@ -23,6 +23,11 @@ export interface Message {
   queuedAt?: number
   syncedAt?: number
   editedAt?: number // Set on content edits only
+  // AI run-help trigger marker: enables the tool-calling agent loop for the
+  // whole conversation and names the chat directory the tools are confined
+  // to (for a trigger sent to a fresh chat it differs from the
+  // conversation's own id). Set on the trigger message only.
+  runHelp?: { chatId: string }
 }
 
 export interface Conversation {

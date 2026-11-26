@@ -400,6 +400,31 @@
   background: rgba(76, 175, 80, 0.15);
 }
 
+.run-ask-btn {
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 11px;
+  border: 1px solid #444;
+  background: none;
+  color: #aaa;
+  cursor: pointer;
+  font-size: 11px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.run-ask-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* A failed last run makes the button ask for attention. */
+.run-ask-btn.attention:not(:disabled) {
+  border-color: #7c5cff;
+  color: #b9a8ff;
+  background: rgba(124, 92, 255, 0.15);
+}
+
 .run-warning {
   padding: 6px 12px;
   background: rgba(255, 152, 0, 0.1);

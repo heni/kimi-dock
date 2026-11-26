@@ -45,6 +45,18 @@ test('appendUserMessage titles a fresh conversation from the first message', () 
   assert.equal(titled.title, 'x'.repeat(50))
 })
 
+test('appendUserMessage carries the runHelp marker when given', () => {
+  const conv = appendUserMessage(emptyConversation, {
+    id: 'm1',
+    content: 'trigger',
+    now: 200,
+    runHelp: { chatId: 'chat-7' }
+  })
+  assert.deepEqual(conv.messages[0].runHelp, { chatId: 'chat-7' })
+  const plain = appendUserMessage(conv, { id: 'm2', content: 'follow-up', now: 300 })
+  assert.equal(plain.messages[1].runHelp, undefined)
+})
+
 test('toApiMessages carries each message exactly once, role/content only', () => {
   const conv = appendUserMessage(emptyConversation, { id: 'm1', content: 'hello', now: 200 })
   const api = toApiMessages(conv.messages)
