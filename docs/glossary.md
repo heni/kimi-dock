@@ -61,6 +61,13 @@ Rules:
   yanked down. Re-engages when the user scrolls back to the bottom.
   The bottom-at-latest position is the **live edge** (beUI's term,
   `docs/ui-design.md` §4).
+- **Streaming reply** (_SSE stream_) — the offline chat's incremental
+  reply delivery (3.6.0): main parses the endpoint's `text/event-stream`
+  (`src/main/chatStream.ts`), forwards content deltas over
+  `kimi-api-stream-event`, and the renderer grows a provisional bubble,
+  persisting only the completed reply. The model's `reasoning_content`
+  is dropped in main (v1). _Not to be confused with:_ the webview
+  surface's streaming — that is kimi.ai's own UI.
 - **userData** — Electron's per-app data directory (`~/.config/kimi-dock` on
   Linux). Holds `kimi-code.json` (OAuth session), `settings.json`,
   `window-state.json`. _Not to be confused with:_ the IndexedDB conversation
