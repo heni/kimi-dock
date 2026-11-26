@@ -84,6 +84,13 @@ test('get_run_json returns null content when there is no run.json', () => {
   assert.equal(result.content, null)
 })
 
+test('get_run_json caps an oversized run.json', () => {
+  const big = 'x'.repeat(40 * 1024)
+  const result = dispatchRunHelpTool(deps({ getRunJson: () => big }), 'get_run_json', '{}')
+  assert.ok(result.length < 33 * 1024)
+  assert.match(result, /truncated/)
+})
+
 test('an unknown tool is a JSON error, not a throw', () => {
   const result = JSON.parse(dispatchRunHelpTool(deps(), 'delete_everything', '{}'))
   assert.match(result.error, /Unknown tool: delete_everything/)
@@ -145,7 +152,7 @@ test('a content round ends the loop and returns the content', async () => {
 test('a tool round appends the assistant message and dispatched results, then continues', async () => {
   const seen = []
   const streamRound = async (body) => {
-    seen.push(body.messages)
+    seen.push(body)
     if (seen.length === 1) {
       return toolRound([{ id: 'call_1', name: 'get_run_output', arguments: '{}' }])
     }
@@ -164,10 +171,12 @@ test('a tool round appends the assistant message and dispatched results, then co
   ])
   assert.equal(result, 'fixed it')
   // Round 1 sees the user message; round 2 sees it plus the assistant
-  // tool_calls message and the dispatched role:tool result.
-  assert.equal(seen[0].length, 1)
-  assert.equal(seen[1].length, 3)
-  const [assistantMsg, toolMsg] = seen[1].slice(1)
+  // tool_calls message and the dispatched role:tool result — and the
+  // tools are offered on every round.
+  assert.equal(seen[0].messages.length, 1)
+  assert.equal(seen[1].messages.length, 3)
+  assert.equal(seen[1].tools, RUN_HELP_TOOLS)
+  const [assistantMsg, toolMsg] = seen[1].messages.slice(1)
   assert.equal(assistantMsg.role, 'assistant')
   assert.equal(assistantMsg.content, null)
   assert.deepEqual(assistantMsg.tool_calls, [
@@ -176,6 +185,24 @@ test('a tool round appends the assistant message and dispatched results, then co
   assert.equal(toolMsg.role, 'tool')
   assert.equal(toolMsg.tool_call_id, 'call_1')
   assert.match(toolMsg.content, /boom/)
+})
+
+test('a tool round with content preserves it on the assistant message', async () => {
+  const seen = []
+  const streamRound = async (body) => {
+    seen.push(body)
+    if (seen.length === 1) {
+      return {
+        content: 'Let me check.',
+        toolCalls: [{ id: 'c1', name: 'list_artifacts', arguments: '{}' }],
+        finishReason: 'tool_calls'
+      }
+    }
+    return contentRound('done')
+  }
+  await runHelpLoop(streamRound, deps(), 'm', [{ role: 'user', content: 'hi' }])
+  const assistantMsg = seen[1].messages[1]
+  assert.equal(assistantMsg.content, 'Let me check.')
 })
 
 test('the loop propagates round errors', async () => {

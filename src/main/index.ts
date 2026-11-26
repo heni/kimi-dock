@@ -802,9 +802,10 @@ ipcMain.handle('import-conversations', async (_, data: unknown) => {
 // /chat/completions with stream:true forced. Content deltas stream back as
 // kimi-api-stream-event messages; reasoning is dropped here (v1). With a
 // validated runHelp payload, main instead runs the tool-calling agent loop
-// (runHelp.ts): tool rounds are consumed internally and the final content
-// round streams as ordinary deltas, so the renderer's serial queue sees one
-// ordinary (slower) streaming request.
+// (runHelp.ts): tool rounds are consumed internally (any content a tool
+// round carries still streams live — it is real model output) and the final
+// content round streams as ordinary deltas, so the renderer's serial queue
+// sees one ordinary (slower) streaming request.
 const STREAM_IDLE_TIMEOUT_MS = 120_000
 const STREAM_REQUEST_ID_MAX_LENGTH = 100
 
@@ -993,8 +994,11 @@ async function runChatStream(
         getRunJson: () => {
           try {
             return readTextFile(runHelp.chatDir, 'run.json')
-          } catch {
-            return null
+          } catch (error) {
+            // Only a missing run.json means "no run.json"; anything else
+            // (permissions, size, binary) is reported to the model.
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return null
+            throw error
           }
         }
       }
@@ -1056,6 +1060,11 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
       runHelp = {
         chatId: payload.runHelp.chatId,
         chatDir: resolveChatDir(getWorkspaceRoot(), payload.runHelp.chatId)
+      }
+      // Fail fast like proc-start: a missing chat dir would otherwise burn
+      // agent rounds against dead tools.
+      if (!fs.existsSync(runHelp.chatDir) || !fs.statSync(runHelp.chatDir).isDirectory()) {
+        return { success: false, error: 'Chat directory does not exist' }
       }
     } catch (error) {
       return { success: false, error: (error as Error).message }

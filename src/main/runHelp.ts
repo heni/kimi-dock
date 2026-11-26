@@ -120,7 +120,7 @@ export function dispatchRunHelpTool(deps: RunHelpDeps, name: unknown, argsJson: 
         })
       }
       case 'get_run_json': {
-        return JSON.stringify({ content: deps.getRunJson() })
+        return cap(JSON.stringify({ content: deps.getRunJson() }), TOOL_RESULT_MAX_CHARS)
       }
       default:
         return JSON.stringify({ error: `Unknown tool: ${String(name)}` })
