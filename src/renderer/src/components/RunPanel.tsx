@@ -62,25 +62,28 @@ export default function RunPanel({
   const [runningId, setRunningId] = useState<string | null>(null)
   const [exitInfo, setExitInfo] = useState<string | null>(null)
   // Structured twin of exitInfo for the ✨ trigger (exit code vs signal).
-  // Tagged with the file and command the run started with: a late proc-exit
-  // after a file switch must not pair the new file's name with the old
-  // file's run, and a post-run command edit must not rewrite what ran.
+  // Tagged with the file, command and source the run started with: a late
+  // proc-exit after a file switch must not pair the new file's name with
+  // the old file's run, and a post-run edit must not rewrite what ran.
   const [lastExit, setLastExit] = useState<{
     code: number | null
     signal: string | null
     file: string | null
     command: string
+    source: 'builtin' | 'run-json' | 'free-form'
   } | null>(null)
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
   const runningFileRef = useRef<string | null>(null)
   const runningCommandRef = useRef<string>('')
+  const runningSourceRef = useRef<'builtin' | 'run-json' | 'free-form'>('free-form')
   const outputRef = useRef<HTMLDivElement | null>(null)
 
   // Resolve the command for the current file; prefill the editable command.
+  // lastExit survives file switches on purpose: it is tagged with its file,
+  // and exitForFile scopes it — switching back must not forget a failed run.
   useEffect(() => {
     setExitInfo(null)
-    setLastExit(null)
     if (!currentFile) {
       setResolved(null)
       setRunJsonError(null)
@@ -139,7 +142,8 @@ export default function RunPanel({
         code: event.code,
         signal: event.signal,
         file: runningFileRef.current,
-        command: runningCommandRef.current
+        command: runningCommandRef.current,
+        source: runningSourceRef.current
       })
       setExitInfo(
         event.code !== null ? `exit ${event.code}` : `killed (${event.signal ?? 'signal'})`
@@ -195,6 +199,7 @@ export default function RunPanel({
     // command is the resolved one; an edited command is free-form.
     const useSpec = resolved && cmd === resolved.spec.command
     const source = useSpec ? resolved.source : 'free-form'
+    runningSourceRef.current = source
     let result
     try {
       result = await window.api?.procStart({
@@ -239,16 +244,24 @@ export default function RunPanel({
   const handleAskAi = (event: React.MouseEvent): void => {
     if (!currentFile) return
     const useSpec = resolved && command.trim() === resolved.spec.command
+    // The trigger describes the run when there is one (in flight or
+    // exited): its own command and source, not the current line — a
+    // post-run edit must not rewrite what ran.
+    const running = runningId !== null
+    const triggerCommand = running
+      ? runningCommandRef.current
+      : (exitForFile?.command ?? command.trim())
+    const triggerSource = running
+      ? runningSourceRef.current
+      : (exitForFile?.source ?? (useSpec ? resolved.source : 'free-form'))
     onAskAi({
       text: buildRunHelpTrigger({
         file: currentFile,
-        // The run's own command when there is an exit for this file —
-        // a post-run edit of the command line must not rewrite what ran.
-        command: exitForFile?.command ?? command.trim(),
-        source: useSpec ? resolved.source : 'free-form',
+        command: triggerCommand,
+        source: triggerSource,
         exitCode: exitForFile?.code ?? null,
         signal: exitForFile?.signal ?? null,
-        running: runningId !== null
+        running
       }),
       newChat: event.altKey
     })

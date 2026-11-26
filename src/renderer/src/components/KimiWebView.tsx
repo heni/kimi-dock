@@ -389,7 +389,7 @@ export default function KimiWebView({
         })
         const startStream = (
           degraded: boolean
-        ): Promise<{ success: boolean; error?: string } | undefined> =>
+        ): Promise<{ success: boolean; error?: string; code?: string } | undefined> =>
           window.api?.kimiApiStreamStart?.({
             requestId,
             body: {
@@ -404,7 +404,7 @@ export default function KimiWebView({
             },
             ...(toolsChatId && !degraded ? { runHelp: { chatId: toolsChatId } } : {})
           })
-        let startResult: { success: boolean; error?: string } | undefined
+        let startResult: { success: boolean; error?: string; code?: string } | undefined
         try {
           startResult = await startStream(false)
           // A marked conversation whose chat dir vanished (external
@@ -415,7 +415,7 @@ export default function KimiWebView({
           if (
             !startResult?.success &&
             toolsChatId &&
-            /chat directory does not exist/i.test(startResult?.error ?? '')
+            startResult?.code === 'RUN_HELP_CHAT_DIR_MISSING'
           ) {
             startResult = await startStream(true)
           }

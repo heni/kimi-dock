@@ -1068,9 +1068,14 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
         chatDir: resolveChatDir(getWorkspaceRoot(), payload.runHelp.chatId)
       }
       // Fail fast like proc-start: a missing chat dir would otherwise burn
-      // agent rounds against dead tools.
+      // agent rounds against dead tools. The code lets the renderer
+      // degrade to a plain request instead of bricking the conversation.
       if (!fs.existsSync(runHelp.chatDir) || !fs.statSync(runHelp.chatDir).isDirectory()) {
-        return { success: false, error: 'Chat directory does not exist' }
+        return {
+          success: false,
+          error: 'Chat directory does not exist',
+          code: 'RUN_HELP_CHAT_DIR_MISSING'
+        }
       }
     } catch (error) {
       return { success: false, error: (error as Error).message }

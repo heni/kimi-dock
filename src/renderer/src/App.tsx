@@ -262,7 +262,15 @@ function App(): React.JSX.Element {
           try {
             const settings = (await window.api?.getSettings?.()) || {}
             if (!settings.forceOfflineMode) {
-              await window.api?.saveSettings?.({ ...settings, forceOfflineMode: true })
+              const result = await window.api?.saveSettings?.({
+                ...settings,
+                forceOfflineMode: true
+              })
+              // A failed flip leaves the chat hidden (the reply still lands
+              // in the conversation — the sidebar selection shows it).
+              if (!result?.success) {
+                console.error('[App] Failed to force offline for Ask AI:', result?.error)
+              }
             }
           } catch (error) {
             console.error('[App] Failed to force offline for Ask AI:', error)

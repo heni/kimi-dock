@@ -73,7 +73,7 @@ contextBridge.exposeInMainWorld('api', {
     requestId: string
     body: Record<string, unknown>
     runHelp?: { chatId: string }
-  }): Promise<{ success: boolean; error?: string }> =>
+  }): Promise<{ success: boolean; error?: string; code?: string }> =>
     ipcRenderer.invoke('kimi-api-stream-start', payload),
   kimiApiStreamAbort: (requestId: string): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('kimi-api-stream-abort', { requestId }),
