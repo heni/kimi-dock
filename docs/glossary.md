@@ -116,6 +116,12 @@ Rules:
   restored on open, keyed `chatId` + NUL + `path` with the disk content as
   the dirty baseline. Session-scoped by design (hot-exit persistence is
   backlog); the app-exit dialog counts drafts via a main-process mirror.
+  When the disk moves away from the open file's draft baseline (an AI
+  run-help write or an external change), the editor shows a **conflict
+  banner** (3.9.1) — "Load disk version" / "Keep my draft" — instead of
+  silently masking the disk; clean buffers simply reload on surface
+  activation, window focus and run-help writes
+  (`utils/editorSync.ts` decides).
 - **Workspace root** (_workspace folder_) — the user-chosen directory that
   holds every chat's artifact directory; persisted as `workspaceRoot` in
   `settings.json`. The renderer reaches it only through the main-process FS

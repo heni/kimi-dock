@@ -204,6 +204,138 @@ try {
     )
   }
 
+  // 7b) External-change invalidation (3.9.1): with a file open, an outside
+  // write to it must show up in the editor after leaving and re-entering
+  // the surface (activation revalidation); the draft-conflict lifecycle
+  // (banner → Keep → suppression re-arm → Load) rides the same setup. The
+  // harness writes the file bytes directly — bypassing the app's FS
+  // gateway, a genuinely external change — and restores them in the
+  // finally. The first picker item is the first non-hidden directory of
+  // the workspace root (the gateway sorts directories first by name).
+  let invalidationDone = false
+  const settingsForWs = await window.evaluate(() => window.api.getSettings())
+  const workspaceRoot = settingsForWs?.workspaceRoot
+  const artifactItem = await window
+    .waitForSelector('.artifact-item', { timeout: 5000 })
+    .catch(() => null)
+  if (workspaceRoot && artifactItem) {
+    const firstChatDir = fs
+      .readdirSync(workspaceRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .sort((a, b) => a.name.localeCompare(b.name))[0]
+    const relPath = await artifactItem.getAttribute('title')
+    const absPath =
+      firstChatDir && relPath ? path.join(workspaceRoot, firstChatDir.name, relPath) : null
+    if (absPath && fs.existsSync(absPath)) {
+      const originalBytes = fs.readFileSync(absPath)
+      try {
+        await artifactItem.click()
+        const opened = await window
+          .waitForSelector('.cm-content', { timeout: 5000 })
+          .catch(() => null)
+        if (!opened) {
+          console.log('[e2e] External-invalidation check skipped: artifact did not open')
+        } else {
+          const marker = `external-invalidation-marker-${Date.now()}`
+          fs.writeFileSync(absPath, Buffer.concat([originalBytes, Buffer.from(`\n${marker}\n`)]))
+          await window.click('.editor-toggle')
+          await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
+          await window.click('.editor-toggle')
+          await window.waitForSelector('.editor-view', { timeout: 5000 })
+          // CodeMirror virtualizes long files: .cm-content's textContent
+          // holds only the viewport lines and the marker sits at EOF — poll
+          // WITH a scroll to the bottom (a reload landing after a one-shot
+          // scroll could leave the marker just past the scroll position).
+          const scrollAndHas = (expected) =>
+            window.waitForFunction(
+              (text) => {
+                const scroller = document.querySelector('.cm-scroller')
+                if (scroller) scroller.scrollTop = scroller.scrollHeight
+                return document.querySelector('.cm-content')?.textContent?.includes(text)
+              },
+              expected,
+              { timeout: 5000 }
+            )
+          await scrollAndHas(marker)
+          console.log('[e2e] External file change picked up after surface re-entry')
+          invalidationDone = true
+
+          // Draft-conflict lifecycle: a draft plus a newer external write
+          // raises the banner; "Keep my draft" suppresses exactly that disk
+          // version; a THIRD write re-arms the question; "Load disk
+          // version" takes a fresh read and drops the draft. The typed text
+          // goes to EOF (Ctrl+End) so the bottom-scrolled viewport renders
+          // it; post-toggle assertions reuse scrollAndHas because the
+          // scroller resets to the top while display:none.
+          const toggleSurface = async () => {
+            await window.click('.editor-toggle')
+            await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
+            await window.click('.editor-toggle')
+            await window.waitForSelector('.editor-view', { timeout: 5000 })
+          }
+          const typedMarker = `typed-${Date.now()}`
+          await window.click('.cm-line >> nth=-1')
+          await window.keyboard.press('Control+End')
+          await window.keyboard.type(typedMarker)
+          fs.appendFileSync(absPath, `\nexternal-invalidation-marker-2-${Date.now()}\n`)
+          await toggleSurface()
+          await window.waitForSelector('.disk-conflict', { timeout: 5000 })
+          console.log('[e2e] Draft + external write raised the conflict banner')
+          await window.click('.disk-conflict-actions button:last-child') // Keep my draft
+          await window.waitForSelector('.disk-conflict', { state: 'hidden', timeout: 5000 })
+          await scrollAndHas(typedMarker)
+          const marker3 = `external-invalidation-marker-3-${Date.now()}`
+          fs.appendFileSync(absPath, `\n${marker3}\n`)
+          await toggleSurface()
+          await window.waitForSelector('.disk-conflict', { timeout: 5000 })
+          console.log('[e2e] A newer external write re-armed the conflict banner')
+          await window.click('.disk-conflict-actions button:first-child') // Load disk version
+          // The load re-reads the file asynchronously; the poll tolerates
+          // the IPC round-trip and scrolls the fresh EOF marker into view.
+          await scrollAndHas(marker3)
+          const typedGone = await window.evaluate(
+            (expected) => !document.querySelector('.cm-content')?.textContent?.includes(expected),
+            typedMarker
+          )
+          if (!typedGone) throw new Error('Load disk version kept the draft text')
+          console.log('[e2e] Conflict lifecycle OK (raise → keep → re-arm → load)')
+        }
+      } finally {
+        // Best-effort: leave no draft or open conflict behind — a dirty
+        // draft pops the exit dialog and blocks app.close() below. Cleanup
+        // must never mask the step's real result, so every probe is caught.
+        try {
+          // The probes only see the visible surface: a failure mid-toggle
+          // leaves the editor hidden — re-activate it first.
+          if (!(await window.isVisible('.editor-view'))) {
+            await window.click('.editor-toggle', { timeout: 3000 })
+            await window.waitForSelector('.editor-view', { timeout: 3000 })
+          }
+          if (await window.isVisible('.disk-conflict')) {
+            await window.click('.disk-conflict-actions button:first-child', { timeout: 3000 })
+            await window
+              .waitForSelector('.disk-conflict', { state: 'hidden', timeout: 3000 })
+              .catch(() => {})
+          } else if (
+            await window.evaluate(() => {
+              const save = document.querySelector('.editor-save')
+              return save instanceof HTMLButtonElement && !save.disabled
+            })
+          ) {
+            await window.click('.editor-save', { timeout: 3000 })
+            await window.waitForSelector('.editor-save:disabled', { timeout: 3000 }).catch(() => {})
+          }
+        } catch {
+          // best-effort cleanup
+        }
+        fs.writeFileSync(absPath, originalBytes)
+      }
+    }
+  }
+  if (!invalidationDone) {
+    console.log('[e2e] External-invalidation check skipped: no openable artifact in the profile')
+  }
+
   await window.click('.editor-toggle')
   await window.waitForSelector('webview.kimi-webview', { timeout: 5000 })
   // Keep-mounted editor: it leaves the visible surface but stays in the DOM.

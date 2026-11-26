@@ -17,6 +17,7 @@
     "../src/renderer/src/utils/artifactNav.ts",
     "../src/renderer/src/utils/transition.ts",
     "../src/renderer/src/utils/runHelp.ts",
+    "../src/renderer/src/utils/editorSync.ts",
     "../src/main/runConfig.ts",
     "../src/main/chatStream.ts",
     "../src/main/runHelp.ts",
