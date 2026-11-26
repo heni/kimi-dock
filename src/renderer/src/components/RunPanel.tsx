@@ -62,16 +62,19 @@ export default function RunPanel({
   const [runningId, setRunningId] = useState<string | null>(null)
   const [exitInfo, setExitInfo] = useState<string | null>(null)
   // Structured twin of exitInfo for the ✨ trigger (exit code vs signal).
-  // Tagged with the file the run started for: a late proc-exit after a
-  // file switch must not pair the new file's name with the old file's run.
+  // Tagged with the file and command the run started with: a late proc-exit
+  // after a file switch must not pair the new file's name with the old
+  // file's run, and a post-run command edit must not rewrite what ran.
   const [lastExit, setLastExit] = useState<{
     code: number | null
     signal: string | null
     file: string | null
+    command: string
   } | null>(null)
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
   const runningFileRef = useRef<string | null>(null)
+  const runningCommandRef = useRef<string>('')
   const outputRef = useRef<HTMLDivElement | null>(null)
 
   // Resolve the command for the current file; prefill the editable command.
@@ -132,7 +135,12 @@ export default function RunPanel({
       if (event.id !== runningIdRef.current) return
       runningIdRef.current = null
       setRunningId(null)
-      setLastExit({ code: event.code, signal: event.signal, file: runningFileRef.current })
+      setLastExit({
+        code: event.code,
+        signal: event.signal,
+        file: runningFileRef.current,
+        command: runningCommandRef.current
+      })
       setExitInfo(
         event.code !== null ? `exit ${event.code}` : `killed (${event.signal ?? 'signal'})`
       )
@@ -172,6 +180,7 @@ export default function RunPanel({
     if (!cmd || runningIdRef.current) return
     runningIdRef.current = 'starting'
     runningFileRef.current = currentFile
+    runningCommandRef.current = cmd
     // Files are saved before the run.
     const saved = await saveCurrentFile()
     if (!saved) {
@@ -233,7 +242,9 @@ export default function RunPanel({
     onAskAi({
       text: buildRunHelpTrigger({
         file: currentFile,
-        command: command.trim(),
+        // The run's own command when there is an exit for this file —
+        // a post-run edit of the command line must not rewrite what ran.
+        command: exitForFile?.command ?? command.trim(),
         source: useSpec ? resolved.source : 'free-form',
         exitCode: exitForFile?.code ?? null,
         signal: exitForFile?.signal ?? null,

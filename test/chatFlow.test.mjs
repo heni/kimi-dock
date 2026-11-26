@@ -181,3 +181,19 @@ test('runHelpPassInfo: delivered trigger → tools without the skill (follow-up 
     skillThisPass: false
   })
 })
+
+test('runHelpPassInfo: the first marker wins when several triggers exist', () => {
+  let conv = appendUserMessage(emptyConversation, {
+    id: 'm1',
+    content: 'first',
+    now: 200,
+    runHelp: { chatId: 'chat-7' }
+  })
+  conv = appendUserMessage(conv, {
+    id: 'm2',
+    content: 'second',
+    now: 300,
+    runHelp: { chatId: 'chat-9' }
+  })
+  assert.equal(runHelpPassInfo(conv.messages, []).toolsChatId, 'chat-7')
+})

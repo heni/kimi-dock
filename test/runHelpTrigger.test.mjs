@@ -80,3 +80,15 @@ test('a run in flight says so instead of claiming no runs', () => {
   assert.match(text, /запущен и ещё выполняется/)
   assert.doesNotMatch(text, /ещё не выполнялся/)
 })
+
+test('an exit code wins over the running flag (branch precedence)', () => {
+  const text = buildRunHelpTrigger({
+    file: 'a.py',
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: 0,
+    signal: null,
+    running: true
+  })
+  assert.match(text, /^Объясни, что делает программа/)
+})

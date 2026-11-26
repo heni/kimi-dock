@@ -210,9 +210,10 @@ export default function KimiWebView({
         void processQueue(next.id)
       } catch (error) {
         // The trigger is already consumed: a local failure must surface,
-        // not vanish (the typed text is lost, so say so plainly).
+        // not vanish (the typed text is lost, so say so plainly). convId
+        // null: the view may never have switched to the target chat.
         setSendError({
-          convId: runHelpTrigger.targetChatId,
+          convId: null,
           message: `Could not save the Ask AI request locally: ${(error as Error).message}`
         })
       }
@@ -375,10 +376,6 @@ export default function KimiWebView({
         // carries the tools' chat directory); the one-shot skill rides only
         // the pass that delivers a trigger.
         const { toolsChatId, skillThisPass } = runHelpPassInfo(current.messages, pending)
-        const systemMessages = [
-          ...(skillThisPass ? [{ role: 'system', content: RUN_HELP_SKILL }] : []),
-          ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : [])
-        ]
         const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
         streamRef.current = { requestId, text: '' }
         setStreamingText('')
@@ -390,16 +387,38 @@ export default function KimiWebView({
         }>((resolve, reject) => {
           streamWaitersRef.current.set(requestId, { resolve, reject })
         })
-        let startResult: { success: boolean; error?: string } | undefined
-        try {
-          startResult = await window.api?.kimiApiStreamStart?.({
+        const startStream = (
+          degraded: boolean
+        ): Promise<{ success: boolean; error?: string } | undefined> =>
+          window.api?.kimiApiStreamStart?.({
             requestId,
             body: {
               model,
-              messages: [...systemMessages, ...apiMessages]
+              messages: [
+                ...(skillThisPass && !degraded
+                  ? [{ role: 'system', content: RUN_HELP_SKILL }]
+                  : []),
+                ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : []),
+                ...apiMessages
+              ]
             },
-            ...(toolsChatId ? { runHelp: { chatId: toolsChatId } } : {})
+            ...(toolsChatId && !degraded ? { runHelp: { chatId: toolsChatId } } : {})
           })
+        let startResult: { success: boolean; error?: string } | undefined
+        try {
+          startResult = await startStream(false)
+          // A marked conversation whose chat dir vanished (external
+          // deletion, workspace change) must not brick: degrade to a
+          // plain request — no tools, no skill — instead of failing
+          // every pass forever. The validation failure happens before
+          // main registers the stream, so the requestId is reusable.
+          if (
+            !startResult?.success &&
+            toolsChatId &&
+            /chat directory does not exist/i.test(startResult?.error ?? '')
+          ) {
+            startResult = await startStream(true)
+          }
         } catch (error) {
           // A start that throws must not orphan the parked waiter.
           streamWaitersRef.current.delete(requestId)
