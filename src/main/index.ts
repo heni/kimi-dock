@@ -959,7 +959,11 @@ async function runChatStream(
         signal: stream.controller.signal
       })
 
-    requestDispatched = true
+    // Set only if the request can actually go on the wire: an abort that
+    // landed during the token refresh makes fetch reject with no network
+    // I/O, and the renderer must not mark the sent messages delivered
+    // (they stay queued for the next send).
+    requestDispatched = !stream.controller.signal.aborted
     let response = await doFetch()
     if (response.status === 401) {
       // Release the first response's socket before retrying.
