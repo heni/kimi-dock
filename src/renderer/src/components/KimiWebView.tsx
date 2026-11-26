@@ -4,6 +4,7 @@ import ChatMarkdown from './ChatMarkdown'
 import {
   appendUserMessage,
   applyAssistantReply,
+  markSentSynced,
   pendingUserMessages,
   toApiMessages
 } from '../utils/chatFlow'
@@ -70,6 +71,24 @@ export default function KimiWebView({
   const [sendError, setSendError] = useState<{ convId: string | null; message: string } | null>(
     null
   )
+  // Streaming reply: the provisional bubble's text mirrors the active
+  // stream's accumulation. streamRef carries the request identity and the
+  // accumulated text (events arrive outside React's render cycle);
+  // streamingText is its render mirror, cleared when the reply persists.
+  const [streamingText, setStreamingText] = useState('')
+  const streamRef = useRef<{ requestId: string; convId: string; text: string } | null>(null)
+  // One waiter per in-flight stream: the queue parks on the promise until
+  // the done/error event for its requestId arrives.
+  const streamWaitersRef = useRef<
+    Map<
+      string,
+      {
+        resolve: (outcome: { aborted: boolean; text: string }) => void
+        reject: (error: Error) => void
+      }
+    >
+  >(new Map())
+  const streamCounterRef = useRef(0)
   // Copy-answer feedback: which message was just copied (or failed to copy).
   const [copyState, setCopyState] = useState<{ id: string; ok: boolean } | null>(null)
   const copyResetRef = useRef<NodeJS.Timeout | null>(null)
@@ -225,12 +244,38 @@ export default function KimiWebView({
     if (settingsReady && !showOfflineView) setWebviewMounted(true)
   }, [settingsReady, showOfflineView])
 
+  // Route stream events to the active request: content deltas accumulate
+  // into the provisional bubble; done/error settle the queue's parked
+  // promise. The serial queue means at most one stream is active; events
+  // for a stale requestId (an already-settled stream's tail) are dropped.
+  useEffect(() => {
+    const unsubscribe = window.api?.onKimiApiStreamEvent?.((event) => {
+      const active = streamRef.current
+      if (!active || event.requestId !== active.requestId) return
+      if (event.type === 'delta') {
+        active.text += event.content
+        setStreamingText(active.text)
+        return
+      }
+      const waiter = streamWaitersRef.current.get(event.requestId)
+      streamWaitersRef.current.delete(event.requestId)
+      if (event.type === 'done') {
+        waiter?.resolve({ aborted: event.aborted, text: active.text })
+      } else {
+        waiter?.reject(new Error(event.message))
+      }
+    })
+    return unsubscribe
+  }, [])
+
   // Serial send queue. Each pass reads the stored record fresh, sends the
   // full history (each message exactly once) and, on success, marks exactly
   // the sent messages 'synced' and appends the reply — re-read before
   // writing, so a message queued while the request was in flight is neither
-  // lost nor re-sent. Failures leave messages 'pending': the next send or
-  // the network coming back retries them.
+  // lost nor re-sent. The reply streams: deltas grow a provisional bubble,
+  // and only the completed text persists (one write, same as before).
+  // Failures leave messages 'pending': the next send or the network coming
+  // back retries them.
   const processQueue = useCallback(async (conversationId: string): Promise<void> => {
     if (processingRef.current) {
       pendingConvIdsRef.current.add(conversationId)
@@ -259,9 +304,17 @@ export default function KimiWebView({
         }
 
         const apiMessages = toApiMessages(current.messages)
-        const result = await window.api?.kimiApiRequest?.({
-          method: 'POST',
-          path: '/chat/completions',
+        const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
+        streamRef.current = { requestId, convId: conversationId, text: '' }
+        setStreamingText('')
+        // Park before starting: the done/error event settles this promise.
+        const outcomePromise = new Promise<{ aborted: boolean; text: string }>(
+          (resolve, reject) => {
+            streamWaitersRef.current.set(requestId, { resolve, reject })
+          }
+        )
+        const startResult = await window.api?.kimiApiStreamStart?.({
+          requestId,
           body: {
             model,
             messages: runSkillArmedRef.current
@@ -269,15 +322,24 @@ export default function KimiWebView({
               : apiMessages
           }
         })
-
-        if (!result?.success) {
-          setSendError({ convId: conversationId, message: result?.error || 'API request failed' })
+        if (!startResult?.success) {
+          streamWaitersRef.current.delete(requestId)
+          streamRef.current = null
+          setStreamingText('')
+          setSendError({
+            convId: conversationId,
+            message: startResult?.error || 'Failed to start the request'
+          })
           failed = true
           break
         }
 
-        const content = result.data?.choices?.[0]?.message?.content
-        if (typeof content !== 'string') {
+        const outcome = await outcomePromise
+        streamRef.current = null
+        setStreamingText('')
+
+        // An empty completed reply is not a reply (abort is handled below).
+        if (!outcome.aborted && outcome.text.length === 0) {
           setSendError({ convId: conversationId, message: 'Unexpected API response' })
           failed = true
           break
@@ -287,11 +349,17 @@ export default function KimiWebView({
         const next = await withRecordLock(async () => {
           const fresh = await offlineManager.getConversation(conversationId)
           if (!fresh) return null
-          const updated = applyAssistantReply(fresh, sentIds, {
-            id: (Date.now() + 1).toString(),
-            content,
-            now: Date.now()
-          })
+          // A user-stopped stream keeps whatever text had arrived (real
+          // model output); stopped before the first delta, there is no
+          // reply to append — the sent messages are still delivered.
+          const updated =
+            outcome.aborted && outcome.text.length === 0
+              ? markSentSynced(fresh, sentIds, Date.now())
+              : applyAssistantReply(fresh, sentIds, {
+                  id: (Date.now() + 1).toString(),
+                  content: outcome.text,
+                  now: Date.now()
+                })
           await offlineManager.saveConversation(updated)
           return updated
         })
@@ -308,6 +376,10 @@ export default function KimiWebView({
       processingRef.current = false
       setIsGenerating(false)
       setQueueConvId(null)
+      // Safety net for the error path: a settled stream never leaks into
+      // the next pass (the normal paths clear this right after the outcome).
+      streamRef.current = null
+      setStreamingText('')
       // Flushes dropped by the guard above wait in the set; hand the queue
       // to the next one — its own finally continues the chain. A failed
       // pass deletes only its own id: a persistent failure must not
@@ -334,6 +406,13 @@ export default function KimiWebView({
       void processQueue(activeConversation.id)
     }
   }, [connectionStatus, activeConversation, processQueue])
+
+  // The send button turns into stop while this chat's reply generates; the
+  // partial text already streamed is kept (see the queue's abort handling).
+  const handleStopGenerating = (): void => {
+    const active = streamRef.current
+    if (active) void window.api?.kimiApiStreamAbort?.(active.requestId)
+  }
 
   // Handle webview load events, keyed on the element itself: whenever a
   // webview (re)mounts — offline boot transition, error-UI reload, surface
@@ -538,8 +617,8 @@ export default function KimiWebView({
   }, [viewedConvId, showOfflineView])
 
   // Bring new content into view: always for the user's own just-sent
-  // message, otherwise only while stuck to the bottom. Replies arrive as
-  // single blocks (no streaming), so appends are the only list growth.
+  // message, otherwise only while stuck to the bottom. List growth comes
+  // from appends and from the streaming bubble's growing text.
   useLayoutEffect(() => {
     const el = messagesRef.current
     if (!el) return
@@ -548,7 +627,7 @@ export default function KimiWebView({
     if (stickToBottomRef.current || (isNewLastMessage && lastMessageRole === 'user')) {
       el.scrollTop = el.scrollHeight
     }
-  }, [viewedConvId, showOfflineView, lastMessageId, lastMessageRole, queueBusyHere])
+  }, [viewedConvId, showOfflineView, lastMessageId, lastMessageRole, queueBusyHere, streamingText])
 
   const handleMessagesScroll = (): void => {
     const el = messagesRef.current
@@ -590,7 +669,13 @@ export default function KimiWebView({
         </div>
       </div>
 
-      <div className="messages-container" ref={messagesRef} onScroll={handleMessagesScroll}>
+      <div
+        className="messages-container"
+        ref={messagesRef}
+        onScroll={handleMessagesScroll}
+        role="log"
+        aria-busy={queueBusyHere}
+      >
         {allMessages.length === 0 ? (
           <div className="empty-chat">
             <div className="empty-icon">💬</div>
@@ -634,7 +719,7 @@ export default function KimiWebView({
           ))
         )}
 
-        {queueBusyHere && (
+        {queueBusyHere && streamingText.length === 0 && (
           <div className="message assistant">
             <div className="message-avatar">🤖</div>
             <div className="message-content">
@@ -643,6 +728,15 @@ export default function KimiWebView({
                 <span></span>
                 <span></span>
               </div>
+            </div>
+          </div>
+        )}
+
+        {queueBusyHere && streamingText.length > 0 && (
+          <div className="message assistant">
+            <div className="message-avatar">🤖</div>
+            <div className="message-content">
+              <ChatMarkdown content={streamingText} />
             </div>
           </div>
         )}
@@ -678,11 +772,13 @@ export default function KimiWebView({
           rows={1}
         />
         <button
-          onClick={handleSendMessage}
-          disabled={!inputValue.trim() || !hasSession}
+          onClick={queueBusyHere ? handleStopGenerating : handleSendMessage}
+          disabled={!queueBusyHere && (!inputValue.trim() || !hasSession)}
           className="send-btn"
+          aria-label={queueBusyHere ? 'Stop generating' : 'Send message'}
+          title={queueBusyHere ? 'Stop generating (the partial reply is kept)' : 'Send'}
         >
-          {queueBusyHere ? '⏳' : '➤'}
+          {queueBusyHere ? '■' : '➤'}
         </button>
       </div>
 

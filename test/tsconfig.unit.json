@@ -17,6 +17,7 @@
     "../src/renderer/src/utils/artifactNav.ts",
     "../src/renderer/src/utils/transition.ts",
     "../src/main/runConfig.ts",
+    "../src/main/chatStream.ts",
     "../src/main/workspace.ts",
     "../src/main/runner.ts"
   ]

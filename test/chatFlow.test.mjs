@@ -12,6 +12,7 @@ import assert from 'node:assert/strict'
 import {
   appendUserMessage,
   applyAssistantReply,
+  markSentSynced,
   pendingUserMessages,
   toApiMessages
 } from '../.tmp/unit-build/renderer/src/utils/chatFlow.js'
@@ -104,4 +105,28 @@ test('a message queued while a request is in flight is neither lost nor re-sent'
     pendingUserMessages(conv).map((m) => m.id),
     ['m2']
   )
+})
+
+test('markSentSynced marks exactly the sent messages and appends no reply', () => {
+  let conv = appendUserMessage(emptyConversation, { id: 'm1', content: 'a', now: 200 })
+  conv = appendUserMessage(conv, { id: 'm2', content: 'b', now: 250 })
+  conv = markSentSynced(conv, ['m1'], 300)
+  const [m1, m2] = conv.messages
+  assert.equal(conv.messages.length, 2)
+  assert.equal(m1.syncStatus, 'synced')
+  assert.equal(m1.syncedAt, 300)
+  assert.equal(m2.syncStatus, 'pending')
+  assert.equal(conv.isOffline, false)
+  assert.equal(conv.updatedAt, 300)
+})
+
+test('markSentSynced ignores assistant ids in the sent set', () => {
+  let conv = appendUserMessage(emptyConversation, { id: 'm1', content: 'a', now: 200 })
+  conv = applyAssistantReply(conv, ['m1'], { id: 'r1', content: 'A', now: 300 })
+  conv = appendUserMessage(conv, { id: 'm2', content: 'b', now: 400 })
+  conv = markSentSynced(conv, ['r1', 'm2'], 500)
+  const reply = conv.messages.find((m) => m.id === 'r1')
+  const m2 = conv.messages.find((m) => m.id === 'm2')
+  assert.equal(reply.syncStatus, undefined)
+  assert.equal(m2.syncStatus, 'synced')
 })

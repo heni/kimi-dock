@@ -62,3 +62,21 @@ export function applyAssistantReply(
   })
   return { ...conversation, messages, isOffline: false, updatedAt: input.now }
 }
+
+// User-stopped stream with no content yet: the sent messages were delivered
+// (the request went out and consumed quota), so exactly those are marked
+// 'synced' — but there is no reply to append. Same fresh-read discipline as
+// applyAssistantReply: the caller applies this to a fresh read of the record.
+export function markSentSynced(
+  conversation: Conversation,
+  sentIds: readonly string[],
+  now: number
+): Conversation {
+  const sent = new Set(sentIds)
+  const messages = conversation.messages.map((message) =>
+    sent.has(message.id) && message.role === 'user'
+      ? { ...message, syncStatus: 'synced' as const, syncedAt: now }
+      : message
+  )
+  return { ...conversation, messages, isOffline: false, updatedAt: now }
+}

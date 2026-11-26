@@ -64,6 +64,22 @@ declare global {
         error?: string | null
       }>
 
+      // Streaming chat completions (offline chat): main forces stream:true
+      // and forwards content deltas as kimi-api-stream-event messages.
+      kimiApiStreamStart: (payload: {
+        requestId: string
+        body: Record<string, unknown>
+      }) => Promise<{ success: boolean; error?: string }>
+      kimiApiStreamAbort: (requestId: string) => Promise<{ success: boolean; error?: string }>
+      onKimiApiStreamEvent: (
+        callback: (
+          event:
+            | { requestId: string; type: 'delta'; content: string }
+            | { requestId: string; type: 'done'; aborted: boolean }
+            | { requestId: string; type: 'error'; message: string }
+        ) => void
+      ) => () => void
+
       // Kimi Code OAuth (Device Authorization Grant)
       oauthStatus: () => Promise<{
         loggedIn: boolean
