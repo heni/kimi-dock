@@ -81,3 +81,18 @@ export function markSentSynced(
   )
   return { ...conversation, messages, isOffline: false, updatedAt: now }
 }
+
+// AI run-help pass info: a conversation holding a run-help trigger gets the
+// tool loop on every request (the marker carries the tools' chat directory,
+// which for a trigger sent to a fresh chat differs from the conversation's
+// own id); the one-shot skill rides only a pass whose pending set contains
+// a trigger.
+export function runHelpPassInfo(
+  messages: Message[],
+  pending: Message[]
+): { toolsChatId: string | undefined; skillThisPass: boolean } {
+  return {
+    toolsChatId: messages.find((m) => m.runHelp)?.runHelp?.chatId,
+    skillThisPass: pending.some((m) => m.runHelp !== undefined)
+  }
+}

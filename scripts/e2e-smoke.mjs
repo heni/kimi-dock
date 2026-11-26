@@ -183,6 +183,20 @@ try {
   console.log('[e2e] Editor surface shown:', editorState)
   await window.screenshot({ path: `${SHOTS}/04-editor.png` })
 
+  // The ✨ Ask AI button lives in the run panel, which renders once a chat
+  // is selected: pick the first chat dir when the picker is up, then
+  // require the button (3.8.0). No live-model call — presence only.
+  if (editorState === 'picker') {
+    const firstDir = await window.$('.chat-dir-item')
+    if (firstDir) {
+      await firstDir.click()
+      await window.waitForSelector('.run-ask-btn', { timeout: 5000 })
+      console.log('[e2e] Ask AI button present in the run panel')
+    } else {
+      console.log('[e2e] Ask AI button check skipped: no chat dirs in the picker')
+    }
+  }
+
   await window.click('.editor-toggle')
   await window.waitForSelector('webview.kimi-webview', { timeout: 5000 })
   // Keep-mounted editor: it leaves the visible surface but stays in the DOM.

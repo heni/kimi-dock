@@ -67,3 +67,16 @@ test('a long command is capped in the trigger', () => {
   assert.ok(text.length < 400)
   assert.match(text, /…`$/)
 })
+
+test('a run in flight says so instead of claiming no runs', () => {
+  const text = buildRunHelpTrigger({
+    file: 'a.py',
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: null,
+    signal: null,
+    running: true
+  })
+  assert.match(text, /запущен и ещё выполняется/)
+  assert.doesNotMatch(text, /ещё не выполнялся/)
+})

@@ -14,6 +14,7 @@ import {
   applyAssistantReply,
   markSentSynced,
   pendingUserMessages,
+  runHelpPassInfo,
   toApiMessages
 } from '../.tmp/unit-build/renderer/src/utils/chatFlow.js'
 
@@ -141,4 +142,42 @@ test('markSentSynced ignores assistant ids in the sent set', () => {
   const m2 = conv.messages.find((m) => m.id === 'm2')
   assert.equal(reply.syncStatus, undefined)
   assert.equal(m2.syncStatus, 'synced')
+})
+
+test('runHelpPassInfo: no marker → no tools, no skill', () => {
+  const conv = appendUserMessage(emptyConversation, { id: 'm1', content: 'hi', now: 200 })
+  assert.deepEqual(runHelpPassInfo(conv.messages, conv.messages), {
+    toolsChatId: undefined,
+    skillThisPass: false
+  })
+})
+
+test('runHelpPassInfo: trigger in the pending set → tools AND one-shot skill', () => {
+  const conv = appendUserMessage(emptyConversation, {
+    id: 'm1',
+    content: 'trigger',
+    now: 200,
+    runHelp: { chatId: 'chat-7' }
+  })
+  const pending = pendingUserMessages(conv)
+  assert.deepEqual(runHelpPassInfo(conv.messages, pending), {
+    toolsChatId: 'chat-7',
+    skillThisPass: true
+  })
+})
+
+test('runHelpPassInfo: delivered trigger → tools without the skill (follow-up pass)', () => {
+  let conv = appendUserMessage(emptyConversation, {
+    id: 'm1',
+    content: 'trigger',
+    now: 200,
+    runHelp: { chatId: 'chat-7' }
+  })
+  conv = applyAssistantReply(conv, ['m1'], { id: 'r1', content: 'A', now: 300 })
+  conv = appendUserMessage(conv, { id: 'm2', content: 'follow-up', now: 400 })
+  const pending = pendingUserMessages(conv)
+  assert.deepEqual(runHelpPassInfo(conv.messages, pending), {
+    toolsChatId: 'chat-7',
+    skillThisPass: false
+  })
 })

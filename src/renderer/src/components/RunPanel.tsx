@@ -62,11 +62,16 @@ export default function RunPanel({
   const [runningId, setRunningId] = useState<string | null>(null)
   const [exitInfo, setExitInfo] = useState<string | null>(null)
   // Structured twin of exitInfo for the ✨ trigger (exit code vs signal).
-  const [lastExit, setLastExit] = useState<{ code: number | null; signal: string | null } | null>(
-    null
-  )
+  // Tagged with the file the run started for: a late proc-exit after a
+  // file switch must not pair the new file's name with the old file's run.
+  const [lastExit, setLastExit] = useState<{
+    code: number | null
+    signal: string | null
+    file: string | null
+  } | null>(null)
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
+  const runningFileRef = useRef<string | null>(null)
   const outputRef = useRef<HTMLDivElement | null>(null)
 
   // Resolve the command for the current file; prefill the editable command.
@@ -127,7 +132,7 @@ export default function RunPanel({
       if (event.id !== runningIdRef.current) return
       runningIdRef.current = null
       setRunningId(null)
-      setLastExit({ code: event.code, signal: event.signal })
+      setLastExit({ code: event.code, signal: event.signal, file: runningFileRef.current })
       setExitInfo(
         event.code !== null ? `exit ${event.code}` : `killed (${event.signal ?? 'signal'})`
       )
@@ -166,6 +171,7 @@ export default function RunPanel({
     // while the save/start round-trips are in flight.
     if (!cmd || runningIdRef.current) return
     runningIdRef.current = 'starting'
+    runningFileRef.current = currentFile
     // Files are saved before the run.
     const saved = await saveCurrentFile()
     if (!saved) {
@@ -201,7 +207,7 @@ export default function RunPanel({
     runningIdRef.current = result.id
     setRunningId(result.id)
     pushHistory(cmd)
-  }, [command, resolved, chatId, saveCurrentFile, pushHistory])
+  }, [command, resolved, chatId, currentFile, saveCurrentFile, pushHistory])
 
   // Surface-level Ctrl+F5 (EditorView's gated keydown) runs the same path
   // as the ▶ Run button.
@@ -215,6 +221,10 @@ export default function RunPanel({
     if (runningIdRef.current) void window.api?.procStop(runningIdRef.current)
   }
 
+  // Only this file's own run counts: a late exit from another file's run
+  // must not leak into the trigger or the attention highlight.
+  const exitForFile = lastExit && lastExit.file === currentFile ? lastExit : null
+
   // ✨ Ask AI: diagnose the last run (or explain the program) in the chat.
   // Alt+click asks in a fresh chat instead of the artifact's own one.
   const handleAskAi = (event: React.MouseEvent): void => {
@@ -225,8 +235,9 @@ export default function RunPanel({
         file: currentFile,
         command: command.trim(),
         source: useSpec ? resolved.source : 'free-form',
-        exitCode: lastExit?.code ?? null,
-        signal: lastExit?.signal ?? null
+        exitCode: exitForFile?.code ?? null,
+        signal: exitForFile?.signal ?? null,
+        running: runningId !== null
       }),
       newChat: event.altKey
     })
@@ -249,7 +260,9 @@ export default function RunPanel({
           </span>
         )}
         <button
-          className={`run-ask-btn${lastExit && lastExit.code !== 0 ? ' attention' : ''}`}
+          // Attention = this file's run did not exit 0 (non-zero or
+          // killed): a failed run is what the button is for.
+          className={`run-ask-btn${exitForFile && exitForFile.code !== 0 ? ' attention' : ''}`}
           onClick={handleAskAi}
           disabled={askDisabled}
           title={askTitle}

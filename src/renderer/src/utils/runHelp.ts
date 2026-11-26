@@ -10,6 +10,7 @@ export interface RunHelpTriggerInput {
   source: 'builtin' | 'run-json' | 'free-form'
   exitCode: number | null // null: no run yet, or killed by a signal
   signal: string | null
+  running?: boolean // a run is in flight right now
 }
 
 const COMMAND_MAX_CHARS = 300
@@ -29,8 +30,9 @@ export function buildRunHelpTrigger(input: RunHelpTriggerInput): string {
   if (input.exitCode === 0) {
     return `Объясни, что делает программа в \`${input.file}\`. Последний запуск: exit 0, команда ${source}: ${command}`
   }
-  const outcome =
-    input.exitCode !== null
+  const outcome = input.running
+    ? 'запущен и ещё выполняется'
+    : input.exitCode !== null
       ? `exit ${input.exitCode}`
       : input.signal !== null
         ? `killed (${input.signal})`

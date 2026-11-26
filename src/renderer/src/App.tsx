@@ -269,22 +269,27 @@ function App(): React.JSX.Element {
           }
         })()
       }
-      if (input.newChat) {
-        setCurrentConversation(null)
-      } else {
-        void offlineManager
-          .getConversation(input.chatId)
-          .then((conversation) => {
+      void (async () => {
+        // Select the target conversation BEFORE handing the trigger over:
+        // a stale post-append read would overwrite the consume effect's
+        // fresh activeConversation and hide the trigger until the reply.
+        if (input.newChat) {
+          setCurrentConversation(null)
+        } else {
+          try {
+            const conversation = await offlineManager.getConversation(input.chatId)
             if (conversation) setCurrentConversation(conversation)
-          })
-          .catch(() => {})
-      }
-      setSurface('chat')
-      setRunHelpTrigger({
-        targetChatId: input.newChat ? null : input.chatId,
-        toolsChatId: input.chatId,
-        text: input.text
-      })
+          } catch {
+            // The consume effect still appends to a fresh read of the id.
+          }
+        }
+        setSurface('chat')
+        setRunHelpTrigger({
+          targetChatId: input.newChat ? null : input.chatId,
+          toolsChatId: input.chatId,
+          text: input.text
+        })
+      })()
     },
     [isOffline]
   )
