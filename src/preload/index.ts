@@ -92,7 +92,7 @@ contextBridge.exposeInMainWorld('api', {
     callback: (
       event:
         | { requestId: string; type: 'delta'; content: string }
-        | { requestId: string; type: 'done'; aborted: boolean }
+        | { requestId: string; type: 'done'; aborted: boolean; dispatched?: boolean }
         | { requestId: string; type: 'error'; message: string }
     ) => void
   ): (() => void) => {

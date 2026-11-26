@@ -935,6 +935,11 @@ async function runChatStream(
   const onSenderDestroyed = (): void => stream.controller.abort()
   sender.once('destroyed', onSenderDestroyed)
 
+  // Set once the request is actually on the wire: an abort before this
+  // point delivered nothing, and the renderer must not mark the sent
+  // messages delivered (they stay queued for the next send).
+  let requestDispatched = false
+
   try {
     // The idle budget covers connect/first-byte too, not just the body phase.
     armIdle()
@@ -954,6 +959,7 @@ async function runChatStream(
         signal: stream.controller.signal
       })
 
+    requestDispatched = true
     let response = await doFetch()
     if (response.status === 401) {
       // Release the first response's socket before retrying.
@@ -1033,7 +1039,7 @@ async function runChatStream(
           message: `The stream stalled (no data for ${STREAM_IDLE_TIMEOUT_MS / 1000} s)`
         })
       } else {
-        sendEvent({ type: 'done', aborted: true })
+        sendEvent({ type: 'done', aborted: true, dispatched: requestDispatched })
       }
     } else {
       console.error('[API Stream] Error:', error)

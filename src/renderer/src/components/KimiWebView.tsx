@@ -87,7 +87,7 @@ export default function KimiWebView({
     Map<
       string,
       {
-        resolve: (outcome: { aborted: boolean; text: string }) => void
+        resolve: (outcome: { aborted: boolean; dispatched: boolean; text: string }) => void
         reject: (error: Error) => void
       }
     >
@@ -264,7 +264,11 @@ export default function KimiWebView({
       const waiter = streamWaitersRef.current.get(event.requestId)
       streamWaitersRef.current.delete(event.requestId)
       if (event.type === 'done') {
-        waiter?.resolve({ aborted: event.aborted, text: active.text })
+        waiter?.resolve({
+          aborted: event.aborted,
+          dispatched: event.dispatched ?? true,
+          text: active.text
+        })
       } else {
         waiter?.reject(new Error(event.message))
       }
@@ -312,11 +316,13 @@ export default function KimiWebView({
         streamRef.current = { requestId, text: '' }
         setStreamingText('')
         // Park before starting: the done/error event settles this promise.
-        const outcomePromise = new Promise<{ aborted: boolean; text: string }>(
-          (resolve, reject) => {
-            streamWaitersRef.current.set(requestId, { resolve, reject })
-          }
-        )
+        const outcomePromise = new Promise<{
+          aborted: boolean
+          dispatched: boolean
+          text: string
+        }>((resolve, reject) => {
+          streamWaitersRef.current.set(requestId, { resolve, reject })
+        })
         let startResult: { success: boolean; error?: string } | undefined
         try {
           startResult = await window.api?.kimiApiStreamStart?.({
@@ -347,6 +353,11 @@ export default function KimiWebView({
         setStreamActive(true)
 
         const outcome = await outcomePromise
+
+        // Stopped before the request went out (main was still preparing it):
+        // nothing was delivered, so nothing is marked — the messages stay
+        // queued for the next send, and there is no reply to persist.
+        if (outcome.aborted && !outcome.dispatched) break
 
         // An empty completed reply is not a reply (abort is handled below).
         if (!outcome.aborted && outcome.text.length === 0) {
@@ -428,7 +439,10 @@ export default function KimiWebView({
   // partial text already streamed is kept (see the queue's abort handling).
   const handleStopGenerating = (): void => {
     const active = streamRef.current
-    if (active) void window.api?.kimiApiStreamAbort?.(active.requestId)
+    if (!active) return
+    // Best-effort: the stream settles via its own events even if the
+    // invoke itself fails, so a rejection here is safe to swallow.
+    void window.api?.kimiApiStreamAbort?.(active.requestId)?.catch(() => {})
   }
 
   // Handle webview load events, keyed on the element itself: whenever a

@@ -604,3 +604,14 @@
 .messages-container::-webkit-scrollbar-thumb:hover {
   background: #444;
 }
+
+/* ui-design.md §8: pop-in and looping animations degrade under reduced motion. */
+@media (prefers-reduced-motion: reduce) {
+  .message {
+    animation: none;
+  }
+
+  .typing-indicator span {
+    animation: none;
+  }
+}
