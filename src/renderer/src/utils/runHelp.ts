@@ -52,6 +52,7 @@ export interface RunExit {
 
 export interface RunHelpContextInput {
   running: boolean
+  runningFile: string | null // the file the in-flight run started for
   runningCtx: { command: string; source: RunHelpTriggerInput['source'] }
   lastExit: RunExit | null
   currentFile: string | null
@@ -67,12 +68,13 @@ export interface RunHelpContext {
   running: boolean
 }
 
-// The trigger describes the run when one exists: mid-run → the running
-// command/source (an in-flight run has no exit yet, whatever the previous
-// one was); exited → the run's own tags (a post-run edit must not rewrite
-// what ran); no run for this file → the current line.
+// The trigger describes the run when one exists FOR THIS FILE: mid-run →
+// the running command/source (an in-flight run has no exit yet, whatever
+// the previous one was); exited → the run's own tags (a post-run edit must
+// not rewrite what ran); no run for this file → the current line. A run
+// in flight for ANOTHER file does not leak into this file's trigger.
 export function selectRunHelpContext(input: RunHelpContextInput): RunHelpContext {
-  if (input.running) {
+  if (input.running && input.runningFile === input.currentFile) {
     return {
       command: input.runningCtx.command,
       source: input.runningCtx.source,

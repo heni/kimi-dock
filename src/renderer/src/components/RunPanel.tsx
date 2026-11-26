@@ -243,6 +243,7 @@ export default function RunPanel({
         file: currentFile,
         ...selectRunHelpContext({
           running: runningId !== null,
+          runningFile: runningFileRef.current,
           runningCtx: { command: runningCommandRef.current, source: runningSourceRef.current },
           lastExit,
           currentFile,

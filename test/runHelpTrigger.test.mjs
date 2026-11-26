@@ -110,6 +110,7 @@ const exit = (over = {}) => ({
 test('mid-run: the running command/source, no exit — whatever the previous run was', () => {
   const ctx = selectRunHelpContext({
     running: true,
+    runningFile: 'a.py',
     runningCtx: { command: 'python edited.py', source: 'free-form' },
     lastExit: exit({ code: 0 }),
     currentFile: 'a.py',
@@ -128,6 +129,7 @@ test('mid-run: the running command/source, no exit — whatever the previous run
 test('exited: the run’s own command and source, not the current line', () => {
   const ctx = selectRunHelpContext({
     running: false,
+    runningFile: null,
     runningCtx: { command: '', source: 'free-form' },
     lastExit: exit({ code: 2, command: 'python a.py', source: 'run-json' }),
     currentFile: 'a.py',
@@ -146,6 +148,7 @@ test('exited: the run’s own command and source, not the current line', () => {
 test('no run for this file: the current line, no exit', () => {
   const ctx = selectRunHelpContext({
     running: false,
+    runningFile: null,
     runningCtx: { command: '', source: 'free-form' },
     lastExit: exit({ file: 'other.py' }),
     currentFile: 'a.py',
@@ -156,6 +159,25 @@ test('no run for this file: the current line, no exit', () => {
     command: 'python a.py',
     source: 'builtin',
     exitCode: null,
+    signal: null,
+    running: false
+  })
+})
+
+test('a run in flight for ANOTHER file does not leak: this file’s exit is used', () => {
+  const ctx = selectRunHelpContext({
+    running: true,
+    runningFile: 'other.py',
+    runningCtx: { command: 'python other.py', source: 'builtin' },
+    lastExit: exit({ code: 1 }),
+    currentFile: 'a.py',
+    currentCommand: 'python a.py',
+    currentSource: 'builtin'
+  })
+  assert.deepEqual(ctx, {
+    command: 'python a.py',
+    source: 'builtin',
+    exitCode: 1,
     signal: null,
     running: false
   })
