@@ -58,7 +58,8 @@
 - **Auto-recovery** — automatic reload with backoff when the webview fails to
   load.
 - **Local chat** — an offline-mode chat view that talks to the Kimi Code API
-  through the same OAuth session.
+  through the same OAuth session; replies stream in token-by-token and can
+  be stopped mid-generation (the partial reply is kept).
 - **Conversation history** — conversations are stored locally (IndexedDB),
   searchable from the sidebar; import/export as JSON in Settings.
 - **Offline access to history** — past conversations stay readable and

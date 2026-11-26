@@ -40,6 +40,7 @@ import {
 } from './workspace'
 import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
+import { createSseParser, classifyStreamEvent } from './chatStream'
 
 // Google login: GIS only falls back to its OAuth popup flow when FedCM is
 // unavailable. Disabling the FedCm feature makes navigator.credentials.get
@@ -874,6 +875,244 @@ ipcMain.handle(
   }
 )
 
+// --- Streaming chat completions ---------------------------------------------
+// The receive half of the offline chat's send queue: same OAuth discipline as
+// kimi-api-request, but hard-coded to POST /chat/completions with stream:true
+// forced (narrower than the generic proxy). Content deltas stream back as
+// kimi-api-stream-event messages; reasoning is dropped here (v1), tool_calls
+// are not expected (no tools are sent) and logged if they arrive anyway.
+const STREAM_IDLE_TIMEOUT_MS = 120_000
+const STREAM_REQUEST_ID_MAX_LENGTH = 100
+
+interface ActiveChatStream {
+  controller: AbortController
+  idleTimer: NodeJS.Timeout | null
+  idleTimedOut: boolean
+}
+
+const activeChatStreams = new Map<string, ActiveChatStream>()
+
+function abortAllChatStreams(): void {
+  for (const stream of activeChatStreams.values()) {
+    stream.controller.abort()
+  }
+}
+
+async function runChatStream(
+  sender: Electron.WebContents,
+  requestId: string,
+  body: Record<string, unknown>
+): Promise<void> {
+  const stream: ActiveChatStream = {
+    controller: new AbortController(),
+    idleTimer: null,
+    idleTimedOut: false
+  }
+  activeChatStreams.set(requestId, stream)
+
+  const sendEvent = (payload: Record<string, unknown>): void => {
+    if (!sender.isDestroyed()) {
+      sender.send('kimi-api-stream-event', { requestId, ...payload })
+    }
+  }
+  const clearIdle = (): void => {
+    if (stream.idleTimer) {
+      clearTimeout(stream.idleTimer)
+      stream.idleTimer = null
+    }
+  }
+  const armIdle = (): void => {
+    clearIdle()
+    stream.idleTimer = setTimeout(() => {
+      stream.idleTimedOut = true
+      stream.controller.abort()
+    }, STREAM_IDLE_TIMEOUT_MS)
+  }
+  // A destroyed renderer (crash, window close) must not leave the fetch
+  // running (tokens cost quota). A plain reload is not covered — 'destroyed'
+  // does not fire on webContents.reload(); there the stream runs out with
+  // its events dropped by the reloaded renderer's requestId guard.
+  const onSenderDestroyed = (): void => stream.controller.abort()
+  sender.once('destroyed', onSenderDestroyed)
+
+  // Set once the request is actually on the wire: an abort before this
+  // point delivered nothing, and the renderer must not mark the sent
+  // messages delivered (they stay queued for the next send).
+  let requestDispatched = false
+
+  // The OAuth refresh awaits take no abort signal (and the refresh fetch has
+  // no timeout of its own): race them against the abort so stop/idle/quit
+  // take effect promptly. A detached refresh settling later is harmless — it
+  // persists the rotated token pair, and Promise.race keeps its rejection
+  // handled.
+  const abortRace = new Promise<never>((_, reject) => {
+    if (stream.controller.signal.aborted) {
+      reject(new Error('The operation was aborted'))
+      return
+    }
+    stream.controller.signal.addEventListener(
+      'abort',
+      () => reject(new Error('The operation was aborted')),
+      { once: true }
+    )
+  })
+
+  try {
+    // The idle budget covers connect/first-byte too, not just the body phase.
+    armIdle()
+    let accessToken = await Promise.race([ensureFreshAccessToken(), abortRace])
+    if (!accessToken) {
+      sendEvent({ type: 'error', message: 'Not logged in to Kimi account' })
+      return
+    }
+    const doFetch = (): Promise<Response> =>
+      fetch(`${CODING_API_BASE}/chat/completions`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ ...body, stream: true }),
+        signal: stream.controller.signal
+      })
+
+    // Set only if the request can actually go on the wire: an abort that
+    // landed during the token refresh makes fetch reject with no network
+    // I/O, and the renderer must not mark the sent messages delivered
+    // (they stay queued for the next send).
+    requestDispatched = !stream.controller.signal.aborted
+    let response = await doFetch()
+    if (response.status === 401) {
+      // Release the first response's socket before retrying.
+      await response.body?.cancel().catch(() => {})
+      accessToken = await Promise.race([forceRefreshAccessToken(), abortRace])
+      if (!accessToken) {
+        sendEvent({ type: 'error', message: 'Session expired, please log in again' })
+        return
+      }
+      response = await doFetch()
+    }
+    if (!response.ok) {
+      const data = (await response.json().catch(() => null)) as {
+        error?: { message?: string }
+      } | null
+      sendEvent({
+        type: 'error',
+        message: data?.error?.message || `HTTP ${response.status}`
+      })
+      return
+    }
+    if (!response.body) {
+      sendEvent({ type: 'error', message: 'Empty response body' })
+      return
+    }
+
+    const parser = createSseParser()
+    const reader = response.body.getReader()
+    const decoder = new TextDecoder()
+    let sawDone = false
+    let sawFinish = false
+    const handleEvents = (events: { data: string }[]): boolean => {
+      for (const event of events) {
+        const classified = classifyStreamEvent(event.data)
+        switch (classified.kind) {
+          case 'content':
+            sendEvent({ type: 'delta', content: classified.text })
+            break
+          case 'error':
+            sendEvent({ type: 'error', message: classified.message })
+            // Tear the connection down; the error event is already out, and
+            // this path returns without re-entering the catch.
+            stream.controller.abort()
+            return false
+          case 'toolCalls':
+            console.warn('[API Stream] unexpected tool_calls delta (no tools sent)')
+            break
+          case 'done':
+            sawDone = true
+            break
+          case 'finish':
+            sawFinish = true
+            break
+          case 'reasoning':
+          case 'ignore':
+            break
+        }
+      }
+      return true
+    }
+
+    for (;;) {
+      const { done, value } = await reader.read()
+      if (done) break
+      armIdle()
+      if (!handleEvents(parser.feed(decoder.decode(value, { stream: true })))) return
+      if (sawDone) break
+    }
+    // [DONE] is the terminator: cancel the tail instead of reading to EOF.
+    await reader.cancel().catch(() => {})
+    // Flush the decoder's partial multibyte char, then the parser's tail.
+    if (!handleEvents(parser.feed(decoder.decode()))) return
+    if (!handleEvents(parser.end())) return
+    // A clean EOF without [DONE] or a finish_reason means the connection
+    // dropped mid-reply: report a failure (the message stays queued for a
+    // retry) instead of persisting a truncated reply as complete.
+    if (!sawDone && !sawFinish) {
+      sendEvent({ type: 'error', message: 'The stream ended unexpectedly' })
+      return
+    }
+    sendEvent({ type: 'done', aborted: false })
+  } catch (error) {
+    if (stream.controller.signal.aborted) {
+      if (stream.idleTimedOut) {
+        sendEvent({
+          type: 'error',
+          message: `The stream stalled (no data for ${STREAM_IDLE_TIMEOUT_MS / 1000} s)`
+        })
+      } else {
+        sendEvent({ type: 'done', aborted: true, dispatched: requestDispatched })
+      }
+    } else {
+      console.error('[API Stream] Error:', error)
+      sendEvent({ type: 'error', message: (error as Error).message })
+    }
+  } finally {
+    clearIdle()
+    sender.removeListener('destroyed', onSenderDestroyed)
+    activeChatStreams.delete(requestId)
+  }
+}
+
+ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
+  if (!isRecord(payload)) {
+    return { success: false, error: 'Invalid stream payload' }
+  }
+  const requestId = payload.requestId
+  if (
+    typeof requestId !== 'string' ||
+    requestId.length === 0 ||
+    requestId.length > STREAM_REQUEST_ID_MAX_LENGTH
+  ) {
+    return { success: false, error: 'Invalid stream request id' }
+  }
+  if (!isRecord(payload.body)) {
+    return { success: false, error: 'Invalid stream body' }
+  }
+  if (activeChatStreams.has(requestId)) {
+    return { success: false, error: 'Duplicate stream request id' }
+  }
+  void runChatStream(event.sender, requestId, payload.body)
+  return { success: true }
+})
+
+ipcMain.handle('kimi-api-stream-abort', async (_, payload: unknown) => {
+  if (!isRecord(payload) || typeof payload.requestId !== 'string') {
+    return { success: false, error: 'Invalid abort payload' }
+  }
+  activeChatStreams.get(payload.requestId)?.controller.abort()
+  return { success: true }
+})
+
 // Kimi Code OAuth (Device Authorization Grant) handlers
 ipcMain.handle('kimi-oauth-status', async () => {
   return getOAuthStatus()
@@ -1264,6 +1503,7 @@ app.whenReady().then(() => {
 // must not kill the running processes.
 app.on('will-quit', () => {
   stopAllProcesses()
+  abortAllChatStreams()
   if (relaunchOnQuit) app.relaunch()
 })
 

@@ -79,6 +79,28 @@ contextBridge.exposeInMainWorld('api', {
     error?: string | null
   }> => ipcRenderer.invoke('kimi-api-request', requestData),
 
+  // Streaming chat completions: the receive half of the offline chat's send
+  // queue. Main forces stream:true and forwards content deltas as events.
+  kimiApiStreamStart: (payload: {
+    requestId: string
+    body: Record<string, unknown>
+  }): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('kimi-api-stream-start', payload),
+  kimiApiStreamAbort: (requestId: string): Promise<{ success: boolean; error?: string }> =>
+    ipcRenderer.invoke('kimi-api-stream-abort', { requestId }),
+  onKimiApiStreamEvent: (
+    callback: (
+      event:
+        | { requestId: string; type: 'delta'; content: string }
+        | { requestId: string; type: 'done'; aborted: boolean; dispatched?: boolean }
+        | { requestId: string; type: 'error'; message: string }
+    ) => void
+  ): (() => void) => {
+    const listener = (_: IpcRendererEvent, event: unknown): void => callback(event as never)
+    ipcRenderer.on('kimi-api-stream-event', listener)
+    return () => ipcRenderer.removeListener('kimi-api-stream-event', listener)
+  },
+
   // Kimi Code OAuth (Device Authorization Grant)
   oauthStatus: (): Promise<{
     loggedIn: boolean

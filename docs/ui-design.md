@@ -74,9 +74,9 @@ The bottom-at-latest position is the **live edge**; the policy is
 
 - Every async action acknowledges itself: a thinking row between send and
   first token, a queued marker on undelivered messages, a typing indicator
-  while a reply generates. (On a non-streaming surface, such as this
-  project's offline chat, the thinking row and the typing indicator are
-  one and the same element.)
+  while a reply generates. (This project's offline chat streams: the typing
+  indicator covers the send → first-token gap, then the growing provisional
+  bubble is the progress signal; only the completed reply persists.)
 - Silent failure is forbidden. Error text says what happened, why, and
   what to do next, in plain language, and preserves the user's input.
 
@@ -88,8 +88,10 @@ across switches. A CSS-hidden surface must gate its global listeners
 
 ## 7. Where this lives in the code
 
-- Composer, stick-to-bottom, typing indicator (`.typing-indicator`), and
-  the send-error notice: `src/renderer/src/components/KimiWebView.tsx`.
+- Composer, stick-to-bottom, typing indicator (`.typing-indicator`), the
+  streaming provisional bubble, and the send-error notice:
+  `src/renderer/src/components/KimiWebView.tsx`; SSE parsing and delta
+  classification: `src/main/chatStream.ts`.
 - Message lifecycle (`seq`, `syncStatus`, `isUndelivered`):
   `src/renderer/src/utils/offlineManagerSchema.ts` (only `pending` is
   produced today; the schema reserves `failed` for a retry-exhausted

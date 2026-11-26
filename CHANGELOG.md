@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.6.0] - 2026-11-26
+
+### Added
+
+- **Streaming replies in the offline chat** — the answer grows
+  token-by-token instead of appearing as one block after the full
+  generation: the typing indicator covers the send → first-token gap
+  (the model's reasoning phase), then a provisional bubble renders the
+  partial markdown live. Only the completed reply is persisted; a stream
+  failure is an ordinary send failure (dismissible notice, the message
+  stays queued for a retry).
+- **Stop generating** — while a reply streams, the send button becomes
+  ■: stopping keeps the partial reply (real model output); stopping
+  after the request went out but before the first token delivers the
+  message with no reply appended; stopping while the request is still
+  being prepared leaves the message queued for the next send.
+
+### Changed
+
+- The offline chat's message list is a log region (`role="log"`,
+  `aria-busy` while a reply generates) per the UI design doc's
+  accessibility minimum.
+
 ## [3.5.12] - 2026-11-25
 
 ### Fixed
