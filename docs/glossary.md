@@ -76,7 +76,13 @@ Rules:
   `role: tool` results between rounds (`src/main/runHelp.ts`) — and the
   four **run-help tools** (`get_run_output`, `read_artifact`,
   `list_artifacts`, `get_run_json`), every path confined to the chat
-  directory via the workspace guard.
+  directory via the workspace guard. The button's **trigger message**
+  (_run-help trigger_) — the human-readable user message that starts a
+  run-help conversation pass («Разберись с последним запуском…», built
+  by `src/renderer/src/utils/runHelp.ts`); it carries the
+  `Message.runHelp` marker that enables the tool loop for the whole
+  conversation and names the tools' chat directory (the LAST marker
+  wins when several accumulate).
 - **userData** — Electron's per-app data directory (`~/.config/kimi-dock` on
   Linux). Holds `kimi-code.json` (OAuth session), `settings.json`,
   `window-state.json`. _Not to be confused with:_ the IndexedDB conversation

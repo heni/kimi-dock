@@ -243,6 +243,72 @@ function App(): React.JSX.Element {
     })
   }, [currentConversation])
 
+  // ✨ Ask AI (run panel): hand the trigger to the offline chat of the
+  // artifact's own conversation — or of a freshly minted one (Alt+click).
+  // The chat lives behind the offline view: when it is not visible
+  // (online and not forced), the persisted force-offline flag flips on
+  // through the same settings path as the title-bar toggle — the badge
+  // shows the state and one click flips back.
+  const [runHelpTrigger, setRunHelpTrigger] = useState<{
+    targetChatId: string | null
+    toolsChatId: string
+    text: string
+  } | null>(null)
+  // Re-entry guard: a double-click must not append the trigger twice or
+  // mint two fresh chats. Cleared when the consume effect acknowledges.
+  const askAiInFlightRef = useRef(false)
+
+  const handleAskAi = useCallback(
+    (input: { chatId: string; text: string; newChat: boolean }) => {
+      if (askAiInFlightRef.current) return
+      askAiInFlightRef.current = true
+      if (!isOffline) {
+        void (async () => {
+          try {
+            const settings = (await window.api?.getSettings?.()) || {}
+            if (!settings.forceOfflineMode) {
+              const result = await window.api?.saveSettings?.({
+                ...settings,
+                forceOfflineMode: true
+              })
+              // A failed flip leaves the chat hidden (the reply still lands
+              // in the conversation — the sidebar selection shows it).
+              if (!result?.success) {
+                console.error('[App] Failed to force offline for Ask AI:', result?.error)
+              }
+            }
+          } catch (error) {
+            console.error('[App] Failed to force offline for Ask AI:', error)
+          }
+        })()
+      }
+      void (async () => {
+        // Select the target conversation BEFORE handing the trigger over:
+        // a stale post-append read would overwrite the consume effect's
+        // fresh activeConversation and hide the trigger until the reply.
+        if (input.newChat) {
+          setCurrentConversation(null)
+        } else {
+          try {
+            const conversation = await offlineManager.getConversation(input.chatId)
+            // No record (a dir adopted by the consume effect): clear the
+            // selection rather than highlight the wrong conversation.
+            setCurrentConversation(conversation ?? null)
+          } catch {
+            // The consume effect still appends to a fresh read of the id.
+          }
+        }
+        setSurface('chat')
+        setRunHelpTrigger({
+          targetChatId: input.newChat ? null : input.chatId,
+          toolsChatId: input.chatId,
+          text: input.text
+        })
+      })()
+    },
+    [isOffline]
+  )
+
   return (
     <ErrorBoundary>
       <div
@@ -290,6 +356,11 @@ function App(): React.JSX.Element {
               onOpenArtifacts={handleOpenArtifacts}
               runSkillArmed={runSkillArmed}
               onDisarmRunSkill={() => setRunSkillArmed(false)}
+              runHelpTrigger={runHelpTrigger}
+              onRunHelpTriggerConsumed={() => {
+                askAiInFlightRef.current = false
+                setRunHelpTrigger(null)
+              }}
             />
           </div>
 
@@ -310,6 +381,8 @@ function App(): React.JSX.Element {
                 skillArmed={runSkillArmed}
                 onToggleSkill={() => setRunSkillArmed((armed) => !armed)}
                 onChatSelected={setEditorChatId}
+                hasSession={hasSession}
+                onAskAi={handleAskAi}
               />
             </div>
           )}

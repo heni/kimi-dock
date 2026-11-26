@@ -63,7 +63,7 @@ declare global {
         requestId: string
         body: Record<string, unknown>
         runHelp?: { chatId: string }
-      }) => Promise<{ success: boolean; error?: string }>
+      }) => Promise<{ success: boolean; error?: string; code?: string }>
       kimiApiStreamAbort: (requestId: string) => Promise<{ success: boolean; error?: string }>
       onKimiApiStreamEvent: (
         callback: (
@@ -148,6 +148,7 @@ declare global {
       procStart: (payload: {
         chatId: string
         command: string
+        source?: string
         env?: Record<string, string>
         cwd?: string
         timeoutSec?: number

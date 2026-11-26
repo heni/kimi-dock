@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { buildRunHelpTrigger, selectRunHelpContext, RunExit } from '../utils/runHelp'
 
 type ResolvedRun = {
   spec: { command: string; env?: Record<string, string>; cwd?: string; timeoutSec?: number }
@@ -15,6 +16,10 @@ interface RunPanelProps {
   saveCurrentFile: () => Promise<boolean>
   // EditorView's surface-level Ctrl+F5 fires whatever is registered here.
   registerRun?: (fn: (() => Promise<void>) | null) => void
+  hasSession: boolean
+  // ✨ Ask AI: the trigger text plus whether to ask in a fresh chat
+  // (Alt+click) instead of the artifact's own chat.
+  onAskAi: (input: { text: string; newChat: boolean }) => void
 }
 
 interface OutputChunk {
@@ -46,7 +51,9 @@ export default function RunPanel({
   skillArmed,
   onToggleSkill,
   saveCurrentFile,
-  registerRun
+  registerRun,
+  hasSession,
+  onAskAi
 }: RunPanelProps): React.JSX.Element {
   const [resolved, setResolved] = useState<ResolvedRun | null>(null)
   const [runJsonError, setRunJsonError] = useState<string | null>(null)
@@ -54,11 +61,21 @@ export default function RunPanel({
   const [chunks, setChunks] = useState<OutputChunk[]>([])
   const [runningId, setRunningId] = useState<string | null>(null)
   const [exitInfo, setExitInfo] = useState<string | null>(null)
+  // Structured twin of exitInfo for the ✨ trigger (exit code vs signal).
+  // Tagged with the file, command and source the run started with: a late
+  // proc-exit after a file switch must not pair the new file's name with
+  // the old file's run, and a post-run edit must not rewrite what ran.
+  const [lastExit, setLastExit] = useState<RunExit | null>(null)
   const [history, setHistory] = useState<string[]>(() => loadHistory(chatId))
   const runningIdRef = useRef<string | null>(null)
+  const runningFileRef = useRef<string | null>(null)
+  const runningCommandRef = useRef<string>('')
+  const runningSourceRef = useRef<'builtin' | 'run-json' | 'free-form'>('free-form')
   const outputRef = useRef<HTMLDivElement | null>(null)
 
   // Resolve the command for the current file; prefill the editable command.
+  // lastExit survives file switches on purpose: it is tagged with its file,
+  // and exitForFile scopes it — switching back must not forget a failed run.
   useEffect(() => {
     setExitInfo(null)
     if (!currentFile) {
@@ -94,6 +111,7 @@ export default function RunPanel({
     setHistory(loadHistory(chatId))
     setChunks([])
     setExitInfo(null)
+    setLastExit(null)
   }, [chatId])
 
   // Process events, filtered to the run this panel started.
@@ -114,6 +132,13 @@ export default function RunPanel({
       if (event.id !== runningIdRef.current) return
       runningIdRef.current = null
       setRunningId(null)
+      setLastExit({
+        code: event.code,
+        signal: event.signal,
+        file: runningFileRef.current,
+        command: runningCommandRef.current,
+        source: runningSourceRef.current
+      })
       setExitInfo(
         event.code !== null ? `exit ${event.code}` : `killed (${event.signal ?? 'signal'})`
       )
@@ -152,6 +177,8 @@ export default function RunPanel({
     // while the save/start round-trips are in flight.
     if (!cmd || runningIdRef.current) return
     runningIdRef.current = 'starting'
+    runningFileRef.current = currentFile
+    runningCommandRef.current = cmd
     // Files are saved before the run.
     const saved = await saveCurrentFile()
     if (!saved) {
@@ -161,14 +188,18 @@ export default function RunPanel({
 
     setChunks([])
     setExitInfo(null)
+    setLastExit(null)
     // The resolved spec's extras (env/cwd/timeoutSec) apply only while the
     // command is the resolved one; an edited command is free-form.
     const useSpec = resolved && cmd === resolved.spec.command
+    const source = useSpec ? resolved.source : 'free-form'
+    runningSourceRef.current = source
     let result
     try {
       result = await window.api?.procStart({
         chatId,
         command: cmd,
+        source,
         ...(useSpec && resolved.spec.env ? { env: resolved.spec.env } : {}),
         ...(useSpec && resolved.spec.cwd ? { cwd: resolved.spec.cwd } : {}),
         ...(useSpec && resolved.spec.timeoutSec ? { timeoutSec: resolved.spec.timeoutSec } : {})
@@ -184,7 +215,7 @@ export default function RunPanel({
     runningIdRef.current = result.id
     setRunningId(result.id)
     pushHistory(cmd)
-  }, [command, resolved, chatId, saveCurrentFile, pushHistory])
+  }, [command, resolved, chatId, currentFile, saveCurrentFile, pushHistory])
 
   // Surface-level Ctrl+F5 (EditorView's gated keydown) runs the same path
   // as the ▶ Run button.
@@ -198,6 +229,41 @@ export default function RunPanel({
     if (runningIdRef.current) void window.api?.procStop(runningIdRef.current)
   }
 
+  // Only this file's own run counts: a late exit from another file's run
+  // must not leak into the trigger or the attention highlight.
+  const exitForFile = lastExit && lastExit.file === currentFile ? lastExit : null
+
+  // ✨ Ask AI: diagnose the last run (or explain the program) in the chat.
+  // Alt+click asks in a fresh chat instead of the artifact's own one.
+  const handleAskAi = (event: React.MouseEvent): void => {
+    if (!currentFile) return
+    const useSpec = resolved && command.trim() === resolved.spec.command
+    onAskAi({
+      text: buildRunHelpTrigger({
+        file: currentFile,
+        ...selectRunHelpContext({
+          // The ref, not the state: it is set before the save/start
+          // round-trips, so a click in that window still sees the run.
+          running: runningIdRef.current !== null,
+          runningFile: runningFileRef.current,
+          runningCtx: { command: runningCommandRef.current, source: runningSourceRef.current },
+          lastExit,
+          currentFile,
+          currentCommand: command.trim(),
+          currentSource: useSpec ? resolved.source : 'free-form'
+        })
+      }),
+      newChat: event.altKey
+    })
+  }
+
+  const askDisabled = !hasSession || !currentFile
+  const askTitle = !hasSession
+    ? 'Log in with your Kimi account (Settings → Kimi Account) to ask AI'
+    : !currentFile
+      ? 'Open a file to ask about it'
+      : 'Ask AI about this run in the chat (Alt+click: in a new chat)'
+
   return (
     <div className="run-panel">
       <div className="run-panel-header">
@@ -207,6 +273,17 @@ export default function RunPanel({
             {resolved.source === 'run-json' ? `run.json: ${resolved.matchedGlob}` : 'built-in'}
           </span>
         )}
+        <button
+          // Attention = this file's run did not exit 0 (non-zero or
+          // killed): a failed run is what the button is for.
+          className={`run-ask-btn${exitForFile && exitForFile.code !== 0 ? ' attention' : ''}`}
+          onClick={handleAskAi}
+          disabled={askDisabled}
+          title={askTitle}
+          aria-label="Ask AI about this run"
+        >
+          ✨ Ask AI
+        </button>
         <button
           className={`run-skill-btn${skillArmed ? ' armed' : ''}`}
           onClick={onToggleSkill}

@@ -9,7 +9,7 @@ import type { Conversation, Message } from './offlineManagerSchema'
 // a new message is user-visible activity.
 export function appendUserMessage(
   conversation: Conversation,
-  input: { id: string; content: string; now: number }
+  input: { id: string; content: string; now: number; runHelp?: { chatId: string } }
 ): Conversation {
   const message: Message = {
     id: input.id,
@@ -17,7 +17,8 @@ export function appendUserMessage(
     content: input.content,
     timestamp: input.now,
     syncStatus: 'pending',
-    queuedAt: input.now
+    queuedAt: input.now,
+    ...(input.runHelp !== undefined ? { runHelp: input.runHelp } : {})
   }
   return {
     ...conversation,
@@ -79,4 +80,25 @@ export function markSentSynced(
       : message
   )
   return { ...conversation, messages, isOffline: false, updatedAt: now }
+}
+
+// AI run-help pass info: a conversation holding a run-help trigger gets the
+// tool loop on every request (the marker carries the tools' chat directory,
+// which for a trigger sent to a fresh chat differs from the conversation's
+// own id); the one-shot skill rides only a pass whose pending set contains
+// a trigger. When several triggers accumulated, the LAST marker wins — the
+// latest ✨ expresses the current intent (an Alt+click-minted chat may grow
+// its own artifacts and get its own trigger later).
+export function runHelpPassInfo(
+  messages: Message[],
+  pending: Message[]
+): { toolsChatId: string | undefined; skillThisPass: boolean } {
+  let toolsChatId: string | undefined
+  for (const message of messages) {
+    if (message.runHelp) toolsChatId = message.runHelp.chatId
+  }
+  return {
+    toolsChatId,
+    skillThisPass: pending.some((m) => m.runHelp !== undefined)
+  }
 }

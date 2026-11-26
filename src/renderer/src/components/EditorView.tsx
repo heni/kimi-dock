@@ -23,6 +23,10 @@ interface EditorViewProps {
   // Picker selections are reported up so App's chat-switch draft guard
   // knows which chat the editor is on.
   onChatSelected?: (chatId: string) => void
+  hasSession: boolean
+  // ✨ Ask AI in the run panel: App switches to the chat and enqueues the
+  // trigger. chatId here is the editor's chat (the tools' target).
+  onAskAi: (input: { chatId: string; text: string; newChat: boolean }) => void
 }
 
 interface ArtifactFile {
@@ -43,7 +47,9 @@ export default function EditorView({
   onClose,
   skillArmed,
   onToggleSkill,
-  onChatSelected
+  onChatSelected,
+  hasSession,
+  onAskAi
 }: EditorViewProps): React.JSX.Element {
   const [activeChatId, setActiveChatId] = useState<string | null>(chatId)
   const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'unset'>('loading')
@@ -546,6 +552,8 @@ export default function EditorView({
             onToggleSkill={onToggleSkill}
             saveCurrentFile={saveCurrentFile}
             registerRun={registerRun}
+            hasSession={hasSession}
+            onAskAi={(input) => onAskAi({ ...input, chatId: activeChatId })}
           />
         )}
       </div>

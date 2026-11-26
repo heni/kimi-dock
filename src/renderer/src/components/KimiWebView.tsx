@@ -6,9 +6,11 @@ import {
   applyAssistantReply,
   markSentSynced,
   pendingUserMessages,
+  runHelpPassInfo,
   toApiMessages
 } from '../utils/chatFlow'
 import RUN_JSON_SKILL from '../../../../resources/skills/run-json/SKILL.md?raw'
+import RUN_HELP_SKILL from '../../../../resources/skills/run-help/SKILL.md?raw'
 import LoadingSkeleton from './LoadingSkeleton'
 import { decideOnlineTransition } from '../utils/transition'
 import '../assets/KimiWebView.css'
@@ -43,6 +45,11 @@ interface KimiWebViewProps {
   onOpenArtifacts: (conversation: Conversation) => void
   runSkillArmed: boolean
   onDisarmRunSkill: () => void
+  // ✨ Ask AI: a trigger to append and send. targetChatId null mints a
+  // fresh conversation; toolsChatId is the artifact's chat the run-help
+  // tools are confined to. Consumed exactly once (the callback clears it).
+  runHelpTrigger: { targetChatId: string | null; toolsChatId: string; text: string } | null
+  onRunHelpTriggerConsumed: () => void
 }
 
 export default function KimiWebView({
@@ -54,7 +61,9 @@ export default function KimiWebView({
   onAuthRequired,
   onOpenArtifacts,
   runSkillArmed,
-  onDisarmRunSkill
+  onDisarmRunSkill,
+  runHelpTrigger,
+  onRunHelpTriggerConsumed
 }: KimiWebViewProps): React.JSX.Element {
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus>(
     navigator.onLine ? 'online' : 'offline'
@@ -160,6 +169,56 @@ export default function KimiWebView({
   useEffect(() => {
     conversationRef.current = activeConversation
   }, [activeConversation])
+
+  // ✨ Ask AI: append the trigger and send it through the ordinary queue.
+  // The trigger carries the runHelp marker, which enables the tool loop
+  // for this conversation and names the tools' chat directory. Consumed
+  // exactly once — the callback clears the App-level state up front, so a
+  // re-render cannot append the same trigger twice.
+  useEffect(() => {
+    if (!runHelpTrigger) return
+    onRunHelpTriggerConsumed()
+    void (async () => {
+      try {
+        const now = Date.now()
+        const next = await withRecordLock(async () => {
+          const stored = runHelpTrigger.targetChatId
+            ? await offlineManager.getConversation(runHelpTrigger.targetChatId)
+            : null
+          const base: Conversation = stored ?? {
+            // A chat dir without a conversation record (deleted record,
+            // external dir) adopts the dir's id, keeping the
+            // conversation↔directory invariant.
+            id: runHelpTrigger.targetChatId ?? now.toString(),
+            title: '',
+            messages: [],
+            createdAt: now,
+            updatedAt: now,
+            isOffline: true
+          }
+          const updated = appendUserMessage(base, {
+            id: now.toString(),
+            content: runHelpTrigger.text,
+            now,
+            runHelp: { chatId: runHelpTrigger.toolsChatId }
+          })
+          await offlineManager.saveConversation(updated)
+          return updated
+        })
+        setActiveConversation(next)
+        setSendError(null)
+        void processQueue(next.id)
+      } catch (error) {
+        // The trigger is already consumed: a local failure must surface,
+        // not vanish (the typed text is lost, so say so plainly). convId
+        // null: the view may never have switched to the target chat.
+        setSendError({
+          convId: null,
+          message: `Could not save the Ask AI request locally: ${(error as Error).message}`
+        })
+      }
+    })()
+  }, [runHelpTrigger])
 
   // The armed run.json skill rides every request as a system message
   // (request-only, never persisted); the ref keeps the serial queue's
@@ -312,6 +371,11 @@ export default function KimiWebView({
         }
 
         const apiMessages = toApiMessages(current.messages)
+        // AI run-help: a conversation holding a trigger gets the tool loop
+        // on every request (follow-ups keep tool access — the marker
+        // carries the tools' chat directory); the one-shot skill rides only
+        // the pass that delivers a trigger.
+        const { toolsChatId, skillThisPass } = runHelpPassInfo(current.messages, pending)
         const requestId = `chat-stream-${Date.now()}-${++streamCounterRef.current}`
         streamRef.current = { requestId, text: '' }
         setStreamingText('')
@@ -323,17 +387,38 @@ export default function KimiWebView({
         }>((resolve, reject) => {
           streamWaitersRef.current.set(requestId, { resolve, reject })
         })
-        let startResult: { success: boolean; error?: string } | undefined
-        try {
-          startResult = await window.api?.kimiApiStreamStart?.({
+        const startStream = (
+          degraded: boolean
+        ): Promise<{ success: boolean; error?: string; code?: string } | undefined> =>
+          window.api?.kimiApiStreamStart?.({
             requestId,
             body: {
               model,
-              messages: runSkillArmedRef.current
-                ? [{ role: 'system', content: RUN_JSON_SKILL }, ...apiMessages]
-                : apiMessages
-            }
+              messages: [
+                ...(skillThisPass && !degraded
+                  ? [{ role: 'system', content: RUN_HELP_SKILL }]
+                  : []),
+                ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : []),
+                ...apiMessages
+              ]
+            },
+            ...(toolsChatId && !degraded ? { runHelp: { chatId: toolsChatId } } : {})
           })
+        let startResult: { success: boolean; error?: string; code?: string } | undefined
+        try {
+          startResult = await startStream(false)
+          // A marked conversation whose chat dir vanished (external
+          // deletion, workspace change) must not brick: degrade to a
+          // plain request — no tools, no skill — instead of failing
+          // every pass forever. The validation failure happens before
+          // main registers the stream, so the requestId is reusable.
+          if (
+            !startResult?.success &&
+            toolsChatId &&
+            startResult?.code === 'RUN_HELP_CHAT_DIR_MISSING'
+          ) {
+            startResult = await startStream(true)
+          }
         } catch (error) {
           // A start that throws must not orphan the parked waiter.
           streamWaitersRef.current.delete(requestId)
