@@ -56,19 +56,13 @@ declare global {
       exportConversations: () => Promise<any[]>
       importConversations: (data: any[]) => Promise<{ success: boolean; error?: string }>
 
-      // CRITICAL FIX: API Proxy - Bypass CSP restrictions (Kimi Code OAuth session)
-      kimiApiRequest: (requestData: { method: string; path: string; body?: any }) => Promise<{
-        success: boolean
-        status?: number
-        data?: any
-        error?: string | null
-      }>
-
       // Streaming chat completions (offline chat): main forces stream:true
       // and forwards content deltas as kimi-api-stream-event messages.
+      // runHelp switches main to the tool-calling agent loop for that chat.
       kimiApiStreamStart: (payload: {
         requestId: string
         body: Record<string, unknown>
+        runHelp?: { chatId: string }
       }) => Promise<{ success: boolean; error?: string }>
       kimiApiStreamAbort: (requestId: string) => Promise<{ success: boolean; error?: string }>
       onKimiApiStreamEvent: (

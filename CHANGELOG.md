@@ -5,6 +5,29 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.7.0] - 2026-11-26
+
+### Added
+
+- **Tool-calling core in main (dark)** — the AI run-help infrastructure,
+  not yet reachable from the UI (the ✨ button ships separately): an
+  OpenAI-style agent loop over the streaming path (≤ 6 iterations; tool
+  rounds are consumed inside main, the final answer streams as ordinary
+  deltas), four read-only tools confined to the chat directory
+  (`get_run_output`, `read_artifact`, `list_artifacts`, `get_run_json`),
+  and a per-chat last-run record teed off the run console (command,
+  source level, exit code, capped stdout/stderr tails). The
+  `kimi-api-stream-start` payload gains a validated `runHelp` field.
+  Covered by new unit tests (dispatch, streamed tool_calls assembly,
+  the agent loop).
+
+### Removed
+
+- **The generic `kimi-api-request` proxy** — consumer-less since the
+  offline chat moved to streaming in 3.6.0 (the tool loop runs
+  main-side); the authenticated surface is removed rather than kept
+  dark.
+
 ## [3.6.0] - 2026-11-26
 
 ### Added

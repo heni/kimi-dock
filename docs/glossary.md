@@ -68,6 +68,15 @@ Rules:
   persisting only the completed reply. The model's `reasoning_content`
   is dropped in main (v1). _Not to be confused with:_ the webview
   surface's streaming — that is kimi.ai's own UI.
+- **AI run-help** (_run-help_) — the ✨ Ask AI feature line (design doc
+  2026-11-25; core 3.7.0, button 3.8.0): run-console diagnostics where
+  the model answers with read-only tool access to the chat directory.
+  Its main-side machinery is the **agent loop** (_tool loop_) — the
+  ≤6-iteration cycle of streamed requests with tools, dispatching
+  `role: tool` results between rounds (`src/main/runHelp.ts`) — and the
+  four **run-help tools** (`get_run_output`, `read_artifact`,
+  `list_artifacts`, `get_run_json`), every path confined to the chat
+  directory via the workspace guard.
 - **userData** — Electron's per-app data directory (`~/.config/kimi-dock` on
   Linux). Holds `kimi-code.json` (OAuth session), `settings.json`,
   `window-state.json`. _Not to be confused with:_ the IndexedDB conversation
