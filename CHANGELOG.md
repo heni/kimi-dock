@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.1] - 2026-11-26
+
+### Added
+
+- **The editor invalidates its buffer on external file changes** — the
+  open file is re-read from disk when the editor surface becomes visible
+  and when the window regains focus, and run-help writes reconcile
+  through the same path. A clean buffer reloads silently; when the file
+  has an unsaved draft and the disk moved away from the draft's baseline
+  (an AI write or an external program), a banner asks instead of
+  silently picking a side: "Load disk version" or "Keep my draft"
+  (suppressed until the disk changes again). Previously the draft
+  silently masked the AI's write and the next save destroyed it, and
+  changes made outside the app never showed up until the file was
+  reopened.
+- e2e: an external-write invalidation step (self-restoring).
+
+### Fixed
+
+- **Ctrl+S now saves from any surface** — the shortcut was gated on the
+  editor being visible, so the run-help write refusal ("save (Ctrl+S)
+  and retry") instructed a dead key while the user sat on the chat
+  surface. The editor-only shortcuts (chords, Ctrl+F5, Ctrl+Tab, preview
+  keys) stay gated.
+
 ## [3.9.0] - 2026-11-26
 
 ### Added

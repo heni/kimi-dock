@@ -204,6 +204,60 @@ try {
     )
   }
 
+  // 7b) External-change invalidation (3.9.1): with a file open, an outside
+  // write to it must show up in the editor after leaving and re-entering
+  // the surface (activation revalidation). The harness writes the file
+  // bytes directly — bypassing the app's FS gateway, a genuinely external
+  // change — and restores them in the finally. The first picker item is
+  // the first non-hidden directory of the workspace root (the gateway
+  // sorts directories first by name).
+  let invalidationDone = false
+  const settingsForWs = await window.evaluate(() => window.api.getSettings())
+  const workspaceRoot = settingsForWs?.workspaceRoot
+  const artifactItem = await window
+    .waitForSelector('.artifact-item', { timeout: 5000 })
+    .catch(() => null)
+  if (workspaceRoot && artifactItem) {
+    const firstChatDir = fs
+      .readdirSync(workspaceRoot, { withFileTypes: true })
+      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+      .sort((a, b) => a.name.localeCompare(b.name))[0]
+    const relPath = await artifactItem.getAttribute('title')
+    const absPath =
+      firstChatDir && relPath ? path.join(workspaceRoot, firstChatDir.name, relPath) : null
+    if (absPath && fs.existsSync(absPath)) {
+      const originalBytes = fs.readFileSync(absPath)
+      try {
+        await artifactItem.click()
+        const opened = await window
+          .waitForSelector('.cm-content', { timeout: 5000 })
+          .catch(() => null)
+        if (!opened) {
+          console.log('[e2e] External-invalidation check skipped: artifact did not open')
+        } else {
+          const marker = `external-invalidation-marker-${Date.now()}`
+          fs.writeFileSync(absPath, Buffer.concat([originalBytes, Buffer.from(`\n${marker}\n`)]))
+          await window.click('.editor-toggle')
+          await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 5000 })
+          await window.click('.editor-toggle')
+          await window.waitForSelector('.editor-view', { timeout: 5000 })
+          await window.waitForFunction(
+            (expected) => document.querySelector('.cm-content')?.textContent?.includes(expected),
+            marker,
+            { timeout: 5000 }
+          )
+          console.log('[e2e] External file change picked up after surface re-entry')
+          invalidationDone = true
+        }
+      } finally {
+        fs.writeFileSync(absPath, originalBytes)
+      }
+    }
+  }
+  if (!invalidationDone) {
+    console.log('[e2e] External-invalidation check skipped: no openable artifact in the profile')
+  }
+
   await window.click('.editor-toggle')
   await window.waitForSelector('webview.kimi-webview', { timeout: 5000 })
   // Keep-mounted editor: it leaves the visible surface but stays in the DOM.

@@ -263,6 +263,38 @@
   font-size: 14px;
 }
 
+.disk-conflict {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 12px;
+  background: rgba(255, 193, 7, 0.12);
+  border-bottom: 1px solid rgba(255, 193, 7, 0.4);
+  color: #ffc107;
+  font-size: 12px;
+}
+
+.disk-conflict-actions {
+  display: flex;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.disk-conflict-actions button {
+  background: none;
+  border: 1px solid rgba(255, 193, 7, 0.5);
+  border-radius: 4px;
+  color: #ffc107;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 8px;
+}
+
+.disk-conflict-actions button:hover {
+  background: rgba(255, 193, 7, 0.15);
+}
+
 .editor-body {
   flex: 1;
   display: flex;

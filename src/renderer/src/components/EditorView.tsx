@@ -8,9 +8,11 @@ import {
   getDraft,
   hasDraft,
   dirtyCount,
+  clearDraft,
   resolveSave,
   saveAllDrafts
 } from '../utils/draftStore'
+import { decideExternalChange } from '../utils/editorSync'
 import { nextArtifactPath } from '../utils/artifactNav'
 import '../assets/EditorView.css'
 
@@ -63,7 +65,23 @@ export default function EditorView({
     currentFileRef.current = currentFile
   }, [currentFile])
   const [fileContent, setFileContent] = useState('')
+  // Mirrors fileContent for post-await guards (revalidation vs openFile
+  // races), same discipline as currentFileRef.
+  const fileContentRef = useRef('')
+  useEffect(() => {
+    fileContentRef.current = fileContent
+  }, [fileContent])
   const [savedContent, setSavedContent] = useState('')
+  // Disk-divergence conflict: the open file has a draft AND the disk moved
+  // away from the draft's baseline (a run-help write or an external
+  // change). The banner asks; silently picking a side would lose work.
+  const [diskConflict, setDiskConflict] = useState<{
+    path: string
+    diskContent: string
+  } | null>(null)
+  // "Keep my draft" remembers the disk version it was chosen over; only a
+  // NEWER disk change re-arms the banner.
+  const suppressedDiskRef = useRef(new Map<string, string>())
   const [viewMode, setViewMode] = useState<ViewMode>('edit')
   const [error, setError] = useState<string | null>(null)
   const [newFileName, setNewFileName] = useState<string | null>(null)
@@ -184,18 +202,71 @@ export default function EditorView({
     [activeChatId]
   )
 
+  // Re-read the open file from disk and reconcile (decideExternalChange):
+  // an external change — a run-help write, another editor, git, the
+  // program itself — reloads the clean buffer, or asks via the conflict
+  // banner when a draft diverges. The disk read is the only await, and the
+  // draft lookup happens after it, so a keystroke during the read is
+  // already reflected in the decision (no rollback of fresh input).
+  const revalidateOpenFile = useCallback(async (): Promise<void> => {
+    if (!activeChatId) return
+    const path = currentFileRef.current
+    if (!path) return
+    const result = await window.api?.fsRead(`${activeChatId}/${path}`)
+    if (!result?.success || result.content === undefined) return
+    if (currentFileRef.current !== path) return // switched away mid-read
+    const draft = getDraft(activeChatId, path)
+    const action = decideExternalChange({
+      diskContent: result.content,
+      currentContent: fileContentRef.current,
+      draftBase: draft ? draft.base : null,
+      suppressedDisk: suppressedDiskRef.current.get(path) ?? null
+    })
+    if (action.kind === 'reload') {
+      setFileContent(result.content)
+      setSavedContent(result.content)
+      setDiskConflict((current) => (current?.path === path ? null : current))
+    } else if (action.kind === 'conflict') {
+      setDiskConflict({ path, diskContent: result.content })
+    } else {
+      setDiskConflict((current) => (current?.path === path ? null : current))
+    }
+  }, [activeChatId])
+
+  // External-change invalidation: the open buffer is a disk cache, so it
+  // is re-read when the editor surface becomes visible and when the window
+  // regains focus (a run-help write lands while the user sits on the chat
+  // surface; vim/git/another editor strike while it is anywhere). The
+  // artifact list refreshes alongside. Identical content is a no-op
+  // (same-value state bails out), so an idle switch costs one small read.
+  useEffect(() => {
+    if (!active) return
+    void refreshFiles()
+    void revalidateOpenFile()
+    const onFocus = (): void => void revalidateOpenFile()
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [active, refreshFiles, revalidateOpenFile])
+
   // AI run-help writes land on disk while the user sits on the chat
-  // surface: refresh the artifact list, and reload the file when it is
-  // open. A draft always wins — openFile restores it instead of reading
-  // the disk, so a keystroke racing the write is never lost.
+  // surface: refresh the artifact list, and reconcile the open file
+  // through the same conflict-aware path (a draft no longer silently
+  // masks the AI's version — the banner asks).
   useEffect(() => {
     const off = window.api?.onRunHelpArtifactWritten?.((payload) => {
       if (!activeChatId || payload.chatId !== activeChatId) return
       void refreshFiles()
-      if (payload.path === currentFileRef.current) void openFile(payload.path)
+      if (payload.path === currentFileRef.current) void revalidateOpenFile()
     })
     return off
-  }, [activeChatId, refreshFiles, openFile])
+  }, [activeChatId, refreshFiles, revalidateOpenFile])
+
+  // The conflict banner and the suppressions are per chat/file: switching
+  // either forgets them (a suppression never leaks into another context).
+  useEffect(() => {
+    setDiskConflict(null)
+    suppressedDiskRef.current.clear()
+  }, [activeChatId, currentFile])
 
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
@@ -208,6 +279,9 @@ export default function EditorView({
       if (currentFileRef.current === path) setSavedContent(written)
       // A keystroke that raced the write survives, re-based onto disk.
       resolveSave(activeChatId, path, written)
+      // The draft is on disk now — any divergence question is settled.
+      suppressedDiskRef.current.delete(path)
+      setDiskConflict((current) => (current?.path === path ? null : current))
       setError(null)
       return true
     }
@@ -229,8 +303,32 @@ export default function EditorView({
     ) {
       setSavedContent(fileContent)
     }
+    // Every draft of this chat was just offered to disk: divergence
+    // questions and suppressions are settled wholesale.
+    suppressedDiskRef.current.clear()
+    setDiskConflict(null)
     setError(failed > 0 ? `Failed to save ${failed} draft${failed === 1 ? '' : 's'}` : null)
   }, [activeChatId, currentFile, fileContent])
+
+  // Conflict banner actions: take the disk version (the draft goes away)
+  // or keep the draft (suppressed until the disk changes again).
+  const handleConflictLoadDisk = (): void => {
+    if (!activeChatId || !diskConflict) return
+    const { path, diskContent } = diskConflict
+    clearDraft(activeChatId, path)
+    suppressedDiskRef.current.delete(path)
+    if (currentFileRef.current === path) {
+      setFileContent(diskContent)
+      setSavedContent(diskContent)
+    }
+    setDiskConflict(null)
+  }
+
+  const handleConflictKeepDraft = (): void => {
+    if (!diskConflict) return
+    suppressedDiskRef.current.set(diskConflict.path, diskConflict.diskContent)
+    setDiskConflict(null)
+  }
 
   const handleCreateFile = async (): Promise<void> => {
     const name = newFileName?.trim()
@@ -270,23 +368,39 @@ export default function EditorView({
     }
   }
 
-  // Surface-level shortcuts, gated on the editor being visible (the
-  // mounted-but-hidden editor must not intercept keystrokes on the chat
-  // surface). Ctrl+S saves from any focus — the CodeMirror keymap handles
-  // the focused case and preventDefaults it, so defaultPrevented skips the
-  // double save; Ctrl+Shift+S (sidebar) is excluded by !shiftKey. Ctrl+F5
-  // runs the current file (VS Code "Run Without Debugging") through the
-  // trigger RunPanel registers. The markdown preview shortcuts below stay
-  // markdown-only.
+  // Plain Ctrl+S saves the editor's current file from ANY surface — the
+  // one deliberate exception to the rule that a CSS-hidden surface must
+  // not answer global keys: the run-help write refusal tells the user
+  // "save (Ctrl+S) and retry" while they sit on the chat surface, and a
+  // dead key there bricks that loop. No conflicts: the chat composer
+  // does not bind Ctrl+S, and a focused webview guest receives keys
+  // before the host. The CodeMirror keymap preventDefaults the focused
+  // case, so the defaultPrevented skip keeps a single save; Ctrl+Shift+S
+  // (sidebar) is excluded by !shiftKey.
   useEffect(() => {
-    if (!active) return
-    const handleKeyDown = (event: KeyboardEvent): void => {
+    const handleSaveKey = (event: KeyboardEvent): void => {
       if (event.ctrlKey && !event.shiftKey && (event.key === 's' || event.key === 'S')) {
         if (event.defaultPrevented) return
         event.preventDefault()
         void saveCurrentFile()
-        return
       }
+    }
+    window.addEventListener('keydown', handleSaveKey)
+    return () => window.removeEventListener('keydown', handleSaveKey)
+  }, [saveCurrentFile])
+
+  // Surface-level shortcuts, gated on the editor being visible (the
+  // mounted-but-hidden editor must not intercept keystrokes on the chat
+  // surface). Ctrl+F5 runs the current file (VS Code "Run Without
+  // Debugging") through the trigger RunPanel registers. The markdown
+  // preview shortcuts below stay markdown-only.
+  useEffect(() => {
+    if (!active) return
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      // The ungated Ctrl+S listener runs first and preventDefaults: a
+      // Ctrl+K → Ctrl+S sequence must not ALSO fire the chord's save-all
+      // (same single-save outcome as before the split).
+      if (event.defaultPrevented) return
       if (event.ctrlKey && event.key === 'F5') {
         event.preventDefault()
         void runTriggerRef.current?.()
@@ -524,6 +638,19 @@ export default function EditorView({
           <div className="editor-error">
             <span>⚠️ {error}</span>
             <button onClick={() => setError(null)}>×</button>
+          </div>
+        )}
+
+        {diskConflict && diskConflict.path === currentFile && (
+          <div className="disk-conflict">
+            <span>
+              ⚠️ {diskConflict.path} changed on disk (AI assistant or an external program). Your
+              unsaved draft differs.
+            </span>
+            <span className="disk-conflict-actions">
+              <button onClick={handleConflictLoadDisk}>Load disk version</button>
+              <button onClick={handleConflictKeepDraft}>Keep my draft</button>
+            </span>
           </div>
         )}
 
