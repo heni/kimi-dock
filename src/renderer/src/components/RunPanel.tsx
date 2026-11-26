@@ -242,7 +242,9 @@ export default function RunPanel({
       text: buildRunHelpTrigger({
         file: currentFile,
         ...selectRunHelpContext({
-          running: runningId !== null,
+          // The ref, not the state: it is set before the save/start
+          // round-trips, so a click in that window still sees the run.
+          running: runningIdRef.current !== null,
           runningFile: runningFileRef.current,
           runningCtx: { command: runningCommandRef.current, source: runningSourceRef.current },
           lastExit,

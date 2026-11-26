@@ -291,7 +291,9 @@ function App(): React.JSX.Element {
         } else {
           try {
             const conversation = await offlineManager.getConversation(input.chatId)
-            if (conversation) setCurrentConversation(conversation)
+            // No record (a dir adopted by the consume effect): clear the
+            // selection rather than highlight the wrong conversation.
+            setCurrentConversation(conversation ?? null)
           } catch {
             // The consume effect still appends to a fresh read of the id.
           }
