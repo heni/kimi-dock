@@ -18,7 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   stays queued for a retry).
 - **Stop generating** — while a reply streams, the send button becomes
   ■: stopping keeps the partial reply (real model output); stopping
-  before the first token delivers the message with no reply appended.
+  after the request went out but before the first token delivers the
+  message with no reply appended; stopping while the request is still
+  being prepared leaves the message queued for the next send.
 
 ### Changed
 

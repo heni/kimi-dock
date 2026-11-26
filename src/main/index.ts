@@ -940,10 +940,27 @@ async function runChatStream(
   // messages delivered (they stay queued for the next send).
   let requestDispatched = false
 
+  // The OAuth refresh awaits take no abort signal (and the refresh fetch has
+  // no timeout of its own): race them against the abort so stop/idle/quit
+  // take effect promptly. A detached refresh settling later is harmless — it
+  // persists the rotated token pair, and Promise.race keeps its rejection
+  // handled.
+  const abortRace = new Promise<never>((_, reject) => {
+    if (stream.controller.signal.aborted) {
+      reject(new Error('The operation was aborted'))
+      return
+    }
+    stream.controller.signal.addEventListener(
+      'abort',
+      () => reject(new Error('The operation was aborted')),
+      { once: true }
+    )
+  })
+
   try {
     // The idle budget covers connect/first-byte too, not just the body phase.
     armIdle()
-    let accessToken = await ensureFreshAccessToken()
+    let accessToken = await Promise.race([ensureFreshAccessToken(), abortRace])
     if (!accessToken) {
       sendEvent({ type: 'error', message: 'Not logged in to Kimi account' })
       return
@@ -968,7 +985,7 @@ async function runChatStream(
     if (response.status === 401) {
       // Release the first response's socket before retrying.
       await response.body?.cancel().catch(() => {})
-      accessToken = await forceRefreshAccessToken()
+      accessToken = await Promise.race([forceRefreshAccessToken(), abortRace])
       if (!accessToken) {
         sendEvent({ type: 'error', message: 'Session expired, please log in again' })
         return
@@ -994,6 +1011,7 @@ async function runChatStream(
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
     let sawDone = false
+    let sawFinish = false
     const handleEvents = (events: { data: string }[]): boolean => {
       for (const event of events) {
         const classified = classifyStreamEvent(event.data)
@@ -1013,8 +1031,10 @@ async function runChatStream(
           case 'done':
             sawDone = true
             break
-          case 'reasoning':
           case 'finish':
+            sawFinish = true
+            break
+          case 'reasoning':
           case 'ignore':
             break
         }
@@ -1034,6 +1054,13 @@ async function runChatStream(
     // Flush the decoder's partial multibyte char, then the parser's tail.
     if (!handleEvents(parser.feed(decoder.decode()))) return
     if (!handleEvents(parser.end())) return
+    // A clean EOF without [DONE] or a finish_reason means the connection
+    // dropped mid-reply: report a failure (the message stays queued for a
+    // retry) instead of persisting a truncated reply as complete.
+    if (!sawDone && !sawFinish) {
+      sendEvent({ type: 'error', message: 'The stream ended unexpectedly' })
+      return
+    }
     sendEvent({ type: 'done', aborted: false })
   } catch (error) {
     if (stream.controller.signal.aborted) {
