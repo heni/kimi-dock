@@ -19,7 +19,7 @@
     "build": "npm run typecheck && electron-vite build",
     "rebuild": "rm -rf out && npm run build",
     "postinstall": "electron-builder install-app-deps",
-    "release": "npm run build && electron-builder",
+    "release": "npm run build && electron-builder --publish never",
     "build:win": "npm run build && electron-builder --win",
     "build:linux": "npm run build && electron-builder --linux",
     "test:e2e": "node scripts/e2e-smoke.mjs",
