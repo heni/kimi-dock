@@ -1042,7 +1042,9 @@ async function runChatStream(
           }
           resolveInWorkspaceReal(chatDir, rel, true)
           writeTextFile(chatDir, rel, content)
-          // The editor surface reloads the file if it is open without a draft.
+          // The editor reconciles the open file conflict-aware on this
+          // event: a clean buffer reloads; a diverged draft raises the
+          // conflict banner.
           if (!sender.isDestroyed()) {
             sender.send('run-help-artifact-written', { chatId, path: rel })
           }

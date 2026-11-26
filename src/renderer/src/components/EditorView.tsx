@@ -291,7 +291,9 @@ export default function EditorView({
 
   // Ctrl+K S: save every dirty draft of THIS chat (other chats are never
   // touched). Failures keep their drafts and are reported; the current
-  // file's baseline advances only if its own write landed.
+  // file's baseline advances only if its own write landed. The content is
+  // read through the ref so this callback's identity — and with it the
+  // gated keydown listener — stays stable across keystrokes.
   const handleSaveAll = useCallback(async (): Promise<void> => {
     if (!activeChatId) return
     const fileAtStart = currentFile
@@ -301,27 +303,39 @@ export default function EditorView({
       currentFileRef.current === fileAtStart &&
       !hasDraft(activeChatId, fileAtStart)
     ) {
-      setSavedContent(fileContent)
+      setSavedContent(fileContentRef.current)
     }
-    // Every draft of this chat was just offered to disk: divergence
-    // questions and suppressions are settled wholesale.
-    suppressedDiskRef.current.clear()
-    setDiskConflict(null)
+    // Divergence questions and suppressions settle wholesale only when
+    // EVERY save landed: on a partial failure the failed files' drafts and
+    // suppressions stay consistent (their disk never moved, so nothing
+    // would re-ask — the question must stay up).
+    if (failed === 0) {
+      suppressedDiskRef.current.clear()
+      setDiskConflict(null)
+    }
     setError(failed > 0 ? `Failed to save ${failed} draft${failed === 1 ? '' : 's'}` : null)
-  }, [activeChatId, currentFile, fileContent])
+  }, [activeChatId, currentFile])
 
   // Conflict banner actions: take the disk version (the draft goes away)
   // or keep the draft (suppressed until the disk changes again).
-  const handleConflictLoadDisk = (): void => {
+  const handleConflictLoadDisk = async (): Promise<void> => {
     if (!activeChatId || !diskConflict) return
-    const { path, diskContent } = diskConflict
-    clearDraft(activeChatId, path)
-    suppressedDiskRef.current.delete(path)
-    if (currentFileRef.current === path) {
-      setFileContent(diskContent)
-      setSavedContent(diskContent)
+    const { path } = diskConflict
+    // The banner-time content is stale by definition: the disk may have
+    // moved again while the banner sat, and applying it would let the next
+    // save silently clobber that newer version. Re-read at click time.
+    const result = await window.api?.fsRead(`${activeChatId}/${path}`)
+    if (currentFileRef.current !== path) return // switched away mid-read
+    if (result?.success && result.content !== undefined) {
+      clearDraft(activeChatId, path)
+      suppressedDiskRef.current.delete(path)
+      setFileContent(result.content)
+      setSavedContent(result.content)
+      setDiskConflict(null)
+    } else {
+      // Keep the draft and leave the conflict up — the user can retry.
+      setError(result?.error ?? 'Failed to load the disk version')
     }
-    setDiskConflict(null)
   }
 
   const handleConflictKeepDraft = (): void => {
@@ -447,7 +461,7 @@ export default function EditorView({
     }
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [active, currentFile, saveCurrentFile, handleSaveAll, files, openFile])
+  }, [active, currentFile, handleSaveAll, files, openFile])
 
   // Two-way scroll sync in split mode (ratio-based, loop-guarded).
   useEffect(() => {
@@ -648,7 +662,7 @@ export default function EditorView({
               unsaved draft differs.
             </span>
             <span className="disk-conflict-actions">
-              <button onClick={handleConflictLoadDisk}>Load disk version</button>
+              <button onClick={() => void handleConflictLoadDisk()}>Load disk version</button>
               <button onClick={handleConflictKeepDraft}>Keep my draft</button>
             </span>
           </div>
