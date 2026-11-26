@@ -41,6 +41,7 @@ import {
 import { resolveRun, substitutePlaceholders, substitutePathPlaceholders } from './runConfig'
 import { startProcess, stopProcess, stopAllProcesses } from './runner'
 import { createSseParser, classifyStreamEvent } from './chatStream'
+import { RunHelpDeps, StreamedRound, assembleToolCalls, runHelpLoop, LastRun } from './runHelp'
 
 // Google login: GIS only falls back to its OAuth popup flow when FedCM is
 // unavailable. Disabling the FedCm feature makes navigator.credentials.get
@@ -796,91 +797,14 @@ ipcMain.handle('import-conversations', async (_, data: unknown) => {
   }
 })
 
-// API Proxy through the Kimi Code OAuth session (main process bypasses renderer CSP).
-// The renderer must never turn this into a generic HTTP proxy: only the coding
-// API endpoints and GET/POST are allowed.
-const API_PROXY_ALLOWED_PATHS = new Set(['/chat/completions'])
-const API_PROXY_ALLOWED_METHODS = new Set(['GET', 'POST'])
-
-ipcMain.handle(
-  'kimi-api-request',
-  async (
-    _,
-    requestData: {
-      method: string
-      path: string
-      body?: any
-    }
-  ) => {
-    try {
-      if (!isRecord(requestData)) {
-        return { success: false, error: 'Invalid request payload' }
-      }
-      const method = typeof requestData.method === 'string' ? requestData.method.toUpperCase() : ''
-      const path = requestData.path
-      if (!API_PROXY_ALLOWED_METHODS.has(method)) {
-        return { success: false, error: `Method not allowed: ${method || '(none)'}` }
-      }
-      if (typeof path !== 'string' || !API_PROXY_ALLOWED_PATHS.has(path)) {
-        return {
-          success: false,
-          error: `Path not allowed: ${typeof path === 'string' ? path : '(none)'}`
-        }
-      }
-      // Bodies are only meaningful for POST; GET never carries one.
-      const body = method === 'POST' ? requestData.body : undefined
-
-      let accessToken = await ensureFreshAccessToken()
-      if (!accessToken) {
-        return { success: false, error: 'Not logged in to Kimi account' }
-      }
-
-      const url = `${CODING_API_BASE}${path}`
-      const doFetch = async (): Promise<Response> =>
-        fetch(url, {
-          method,
-          headers: {
-            Authorization: `Bearer ${accessToken}`,
-            ...(body !== undefined ? { 'Content-Type': 'application/json' } : {})
-          },
-          body: body !== undefined ? JSON.stringify(body) : undefined
-        })
-
-      let response = await doFetch()
-
-      // On 401 try one forced token refresh and retry the request
-      if (response.status === 401) {
-        accessToken = await forceRefreshAccessToken()
-        if (!accessToken) {
-          return { success: false, status: 401, error: 'Session expired, please log in again' }
-        }
-        response = await doFetch()
-      }
-
-      const data = await response.json()
-
-      return {
-        success: response.ok,
-        status: response.status,
-        data: data,
-        error: response.ok ? null : data.error?.message || `HTTP ${response.status}`
-      }
-    } catch (error) {
-      console.error('[API Proxy] Error:', error)
-      return {
-        success: false,
-        error: (error as Error).message
-      }
-    }
-  }
-)
-
 // --- Streaming chat completions ---------------------------------------------
-// The receive half of the offline chat's send queue: same OAuth discipline as
-// kimi-api-request, but hard-coded to POST /chat/completions with stream:true
-// forced (narrower than the generic proxy). Content deltas stream back as
-// kimi-api-stream-event messages; reasoning is dropped here (v1), tool_calls
-// are not expected (no tools are sent) and logged if they arrive anyway.
+// The receive half of the offline chat's send queue: hard-coded to POST
+// /chat/completions with stream:true forced. Content deltas stream back as
+// kimi-api-stream-event messages; reasoning is dropped here (v1). With a
+// validated runHelp payload, main instead runs the tool-calling agent loop
+// (runHelp.ts): tool rounds are consumed internally and the final content
+// round streams as ordinary deltas, so the renderer's serial queue sees one
+// ordinary (slower) streaming request.
 const STREAM_IDLE_TIMEOUT_MS = 120_000
 const STREAM_REQUEST_ID_MAX_LENGTH = 100
 
@@ -901,7 +825,8 @@ function abortAllChatStreams(): void {
 async function runChatStream(
   sender: Electron.WebContents,
   requestId: string,
-  body: Record<string, unknown>
+  body: Record<string, unknown>,
+  runHelp?: { chatId: string; chatDir: string }
 ): Promise<void> {
   const stream: ActiveChatStream = {
     controller: new AbortController(),
@@ -935,8 +860,8 @@ async function runChatStream(
   const onSenderDestroyed = (): void => stream.controller.abort()
   sender.once('destroyed', onSenderDestroyed)
 
-  // Set once the request is actually on the wire: an abort before this
-  // point delivered nothing, and the renderer must not mark the sent
+  // Set once the first request is actually on the wire: an abort before
+  // this point delivered nothing, and the renderer must not mark the sent
   // messages delivered (they stay queued for the next send).
   let requestDispatched = false
 
@@ -957,14 +882,12 @@ async function runChatStream(
     )
   })
 
-  try {
-    // The idle budget covers connect/first-byte too, not just the body phase.
-    armIdle()
+  // One streamed round: fetch with a single 401-refresh retry, SSE parsing,
+  // content deltas forwarded live, tool_calls deltas assembled. Throws on
+  // any failure — the outer catch maps aborts and errors to their events.
+  const streamRound = async (roundBody: Record<string, unknown>): Promise<StreamedRound> => {
     let accessToken = await Promise.race([ensureFreshAccessToken(), abortRace])
-    if (!accessToken) {
-      sendEvent({ type: 'error', message: 'Not logged in to Kimi account' })
-      return
-    }
+    if (!accessToken) throw new Error('Not logged in to Kimi account')
     const doFetch = (): Promise<Response> =>
       fetch(`${CODING_API_BASE}/chat/completions`, {
         method: 'POST',
@@ -972,94 +895,115 @@ async function runChatStream(
           Authorization: `Bearer ${accessToken}`,
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ ...body, stream: true }),
+        body: JSON.stringify({ ...roundBody, stream: true }),
         signal: stream.controller.signal
       })
 
-    // Set only if the request can actually go on the wire: an abort that
-    // landed during the token refresh makes fetch reject with no network
-    // I/O, and the renderer must not mark the sent messages delivered
-    // (they stay queued for the next send).
-    requestDispatched = !stream.controller.signal.aborted
+    if (!requestDispatched) {
+      // Set only if the request can actually go on the wire: an abort that
+      // landed during the token refresh makes fetch reject with no network
+      // I/O, and the renderer must not mark the sent messages delivered.
+      requestDispatched = !stream.controller.signal.aborted
+    }
     let response = await doFetch()
     if (response.status === 401) {
       // Release the first response's socket before retrying.
       await response.body?.cancel().catch(() => {})
       accessToken = await Promise.race([forceRefreshAccessToken(), abortRace])
-      if (!accessToken) {
-        sendEvent({ type: 'error', message: 'Session expired, please log in again' })
-        return
-      }
+      if (!accessToken) throw new Error('Session expired, please log in again')
       response = await doFetch()
     }
     if (!response.ok) {
       const data = (await response.json().catch(() => null)) as {
         error?: { message?: string }
       } | null
-      sendEvent({
-        type: 'error',
-        message: data?.error?.message || `HTTP ${response.status}`
-      })
-      return
+      throw new Error(data?.error?.message || `HTTP ${response.status}`)
     }
-    if (!response.body) {
-      sendEvent({ type: 'error', message: 'Empty response body' })
-      return
-    }
+    if (!response.body) throw new Error('Empty response body')
 
     const parser = createSseParser()
     const reader = response.body.getReader()
     const decoder = new TextDecoder()
+    let content = ''
+    const toolCallDeltas: unknown[] = []
     let sawDone = false
     let sawFinish = false
-    const handleEvents = (events: { data: string }[]): boolean => {
+    let finishReason: string | null = null
+    const handleEvents = (events: { data: string }[]): void => {
       for (const event of events) {
         const classified = classifyStreamEvent(event.data)
         switch (classified.kind) {
           case 'content':
+            content += classified.text
             sendEvent({ type: 'delta', content: classified.text })
             break
           case 'error':
-            sendEvent({ type: 'error', message: classified.message })
-            // Tear the connection down; the error event is already out, and
-            // this path returns without re-entering the catch.
-            stream.controller.abort()
-            return false
+            throw new Error(classified.message)
           case 'toolCalls':
-            console.warn('[API Stream] unexpected tool_calls delta (no tools sent)')
+            toolCallDeltas.push(...classified.calls)
             break
           case 'done':
             sawDone = true
             break
           case 'finish':
             sawFinish = true
+            finishReason = classified.reason
             break
           case 'reasoning':
           case 'ignore':
             break
         }
       }
-      return true
     }
 
-    for (;;) {
-      const { done, value } = await reader.read()
-      if (done) break
-      armIdle()
-      if (!handleEvents(parser.feed(decoder.decode(value, { stream: true })))) return
-      if (sawDone) break
+    try {
+      for (;;) {
+        const { done, value } = await reader.read()
+        if (done) break
+        armIdle()
+        handleEvents(parser.feed(decoder.decode(value, { stream: true })))
+        if (sawDone) break
+      }
+      // [DONE] is the terminator: cancel the tail instead of reading to EOF.
+      await reader.cancel().catch(() => {})
+      // Flush the decoder's partial multibyte char, then the parser's tail.
+      handleEvents(parser.feed(decoder.decode()))
+      handleEvents(parser.end())
+    } catch (error) {
+      // A failed round must not leave the connection downloading unread.
+      await reader.cancel().catch(() => {})
+      throw error
     }
-    // [DONE] is the terminator: cancel the tail instead of reading to EOF.
-    await reader.cancel().catch(() => {})
-    // Flush the decoder's partial multibyte char, then the parser's tail.
-    if (!handleEvents(parser.feed(decoder.decode()))) return
-    if (!handleEvents(parser.end())) return
     // A clean EOF without [DONE] or a finish_reason means the connection
-    // dropped mid-reply: report a failure (the message stays queued for a
+    // dropped mid-reply: fail the round (the message stays queued for a
     // retry) instead of persisting a truncated reply as complete.
-    if (!sawDone && !sawFinish) {
-      sendEvent({ type: 'error', message: 'The stream ended unexpectedly' })
-      return
+    if (!sawDone && !sawFinish) throw new Error('The stream ended unexpectedly')
+    return { content, toolCalls: assembleToolCalls(toolCallDeltas), finishReason }
+  }
+
+  try {
+    // The idle budget covers connect/first-byte too, not just the body phase.
+    armIdle()
+    if (runHelp) {
+      const chatId = runHelp.chatId
+      const deps: RunHelpDeps = {
+        getLastRun: () => lastRunByChat.get(chatId) ?? null,
+        readArtifact: (relPath) => readTextFile(runHelp.chatDir, relPath),
+        listArtifacts: () => listFilesRecursive(runHelp.chatDir, '.').map((f) => f.path),
+        getRunJson: () => {
+          try {
+            return readTextFile(runHelp.chatDir, 'run.json')
+          } catch {
+            return null
+          }
+        }
+      }
+      await runHelpLoop(streamRound, deps, body.model as string, body.messages as unknown[])
+    } else {
+      const round = await streamRound(body)
+      if (round.toolCalls.length > 0) {
+        console.warn('[API Stream] unexpected tool_calls delta (no tools sent)')
+      }
     }
     sendEvent({ type: 'done', aborted: false })
   } catch (error) {
@@ -1098,10 +1042,29 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
   if (!isRecord(payload.body)) {
     return { success: false, error: 'Invalid stream body' }
   }
+  // AI run-help: the same endpoint with tools and a main-side agent loop.
+  // chatId is validated and every tool is confined to that chat directory.
+  let runHelp: { chatId: string; chatDir: string } | undefined
+  if (payload.runHelp !== undefined) {
+    if (!isRecord(payload.runHelp) || typeof payload.runHelp.chatId !== 'string') {
+      return { success: false, error: 'Invalid runHelp payload' }
+    }
+    if (typeof payload.body.model !== 'string' || !Array.isArray(payload.body.messages)) {
+      return { success: false, error: 'Invalid chat body' }
+    }
+    try {
+      runHelp = {
+        chatId: payload.runHelp.chatId,
+        chatDir: resolveChatDir(getWorkspaceRoot(), payload.runHelp.chatId)
+      }
+    } catch (error) {
+      return { success: false, error: (error as Error).message }
+    }
+  }
   if (activeChatStreams.has(requestId)) {
     return { success: false, error: 'Duplicate stream request id' }
   }
-  void runChatStream(event.sender, requestId, payload.body)
+  void runChatStream(event.sender, requestId, payload.body, runHelp)
   return { success: true }
 })
 
@@ -1311,6 +1274,18 @@ ipcMain.handle('proc-resolve', async (_, chatId: unknown, relPath: unknown) => {
 const PROC_COMMAND_MAX_LENGTH = 4000
 const PROC_ENV_MAX_ENTRIES = 50
 const PROC_TIMEOUT_MAX_SEC = 3600
+const PROC_SOURCE_MAX_LENGTH = 32
+const RUN_TAIL_MAX_CHARS = 8 * 1024
+
+// Last run per chat directory, teed off proc-start for the AI run-help
+// tools (get_run_output). Tails are capped; the map holds one record per
+// chat, so it cannot grow unbounded within a session.
+const lastRunByChat = new Map<string, LastRun>()
+
+const appendTail = (tail: string, data: string): string => {
+  const next = tail + data
+  return next.length > RUN_TAIL_MAX_CHARS ? next.slice(next.length - RUN_TAIL_MAX_CHARS) : next
+}
 
 ipcMain.handle('proc-start', async (_, payload: unknown) => {
   try {
@@ -1367,17 +1342,44 @@ ipcMain.handle('proc-start', async (_, payload: unknown) => {
       timeoutSec = payload.timeoutSec
     }
 
+    let source: string | undefined
+    if (payload.source !== undefined) {
+      if (typeof payload.source !== 'string' || payload.source.length > PROC_SOURCE_MAX_LENGTH) {
+        throw new Error('Invalid source')
+      }
+      source = payload.source
+    }
+
+    const runRecord: LastRun = {
+      command: payload.command,
+      ...(source !== undefined ? { source } : {}),
+      exitCode: null,
+      signal: null,
+      stdoutTail: '',
+      stderrTail: '',
+      endedAt: null
+    }
+    lastRunByChat.set(payload.chatId as string, runRecord)
+
     const id = startProcess({
       command: payload.command,
       cwd,
       env,
       timeoutSec,
       onOutput: (stream, data) => {
+        if (stream === 'stdout') {
+          runRecord.stdoutTail = appendTail(runRecord.stdoutTail, data)
+        } else {
+          runRecord.stderrTail = appendTail(runRecord.stderrTail, data)
+        }
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('proc-output', { id, stream, data })
         }
       },
       onExit: (code, signal) => {
+        runRecord.exitCode = code
+        runRecord.signal = signal
+        runRecord.endedAt = Date.now()
         if (mainWindow && !mainWindow.isDestroyed()) {
           mainWindow.webContents.send('proc-exit', { id, code, signal })
         }

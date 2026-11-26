@@ -66,24 +66,13 @@ contextBridge.exposeInMainWorld('api', {
   importConversations: (data: unknown): Promise<unknown> =>
     ipcRenderer.invoke('import-conversations', data),
 
-  // CRITICAL FIX: API Proxy - Bypass CSP by making requests in main process
-  // Uses the Kimi Code OAuth session managed in the main process
-  kimiApiRequest: (requestData: {
-    method: string
-    path: string
-    body?: unknown
-  }): Promise<{
-    success: boolean
-    status?: number
-    data?: any
-    error?: string | null
-  }> => ipcRenderer.invoke('kimi-api-request', requestData),
-
   // Streaming chat completions: the receive half of the offline chat's send
   // queue. Main forces stream:true and forwards content deltas as events.
+  // runHelp switches main to the tool-calling agent loop for that chat.
   kimiApiStreamStart: (payload: {
     requestId: string
     body: Record<string, unknown>
+    runHelp?: { chatId: string }
   }): Promise<{ success: boolean; error?: string }> =>
     ipcRenderer.invoke('kimi-api-stream-start', payload),
   kimiApiStreamAbort: (requestId: string): Promise<{ success: boolean; error?: string }> =>

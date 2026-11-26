@@ -95,11 +95,10 @@ test('content in a finish delta is not lost (content wins)', () => {
   assert.deepEqual(classifyStreamEvent(data), { kind: 'content', text: 'end' })
 })
 
-test('a tool_calls delta classifies as toolCalls', () => {
-  const data = JSON.stringify({
-    choices: [{ delta: { tool_calls: [{ index: 0, id: 'call_1' }] } }]
-  })
-  assert.deepEqual(classifyStreamEvent(data), { kind: 'toolCalls' })
+test('a tool_calls delta classifies as toolCalls with the raw payload', () => {
+  const calls = [{ index: 0, id: 'call_1' }]
+  const data = JSON.stringify({ choices: [{ delta: { tool_calls: calls } }] })
+  assert.deepEqual(classifyStreamEvent(data), { kind: 'toolCalls', calls })
 })
 
 test('a mid-stream error payload classifies as error', () => {
