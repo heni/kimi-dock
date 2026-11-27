@@ -298,8 +298,9 @@ export default function EditorView({
 
   // Save-time guard: a save must never silently overwrite a disk version
   // the buffer does not know (editor consensus — VS Code asks at save
-  // time, Sublime after an edit-time ignore, Vim W12). The disk is read
-  // before every write and reconciled by the same decideExternalChange
+  // time, Sublime after an edit-time ignore, Vim on a moved timestamp).
+  // The disk is read before every write and reconciled by the same
+  // decideExternalChange
   // the revalidation uses: a clean stale buffer just takes the disk
   // version (nothing to save), a diverged draft raises the native
   // question — it works from any surface, unlike the banner. The ref

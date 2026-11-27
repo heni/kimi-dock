@@ -99,10 +99,11 @@ agree on four rules:
   prompting when you have no unsaved changes" [6].
 - **A dirty buffer is never silently resolved.** Editors differ only in
   WHEN they ask: at edit time (Sublime's reload/ignore choice [6],
-  JetBrains' File Cache Conflict dialog [9], Vim's W12 warning [10]) or
-  at save time (VS Code flags the divergence and asks on save [7]; Zed
-  flags the buffer as modified rather than reloading [8]). Asking at
-  both points is legitimate; asking at neither loses work.
+  JetBrains' File Cache Conflict dialog [9]) or at save time (VS Code
+  flags the divergence and asks on save [7]; Zed flags the buffer as
+  modified rather than reloading [8]; Vim checks the timestamp before
+  writing and asks y/n when it moved [10]). Asking at both points is
+  legitimate; asking at neither loses work.
 - **A save never overwrites a newer disk version silently.** The user
   who was shown the divergence and chose their draft may overwrite
   (Sublime's ignore-then-save [6]); otherwise the question belongs at
@@ -182,4 +183,4 @@ item by item.
 7. microsoft/vscode — [issue #100504: file changed on disk, the save-over risk](https://github.com/microsoft/vscode/issues/100504)
 8. zed-industries/zed — [issue #6260: a changed-on-disk buffer is flagged as modified, not silently reloaded](https://github.com/zed-industries/zed/issues/6260)
 9. JetBrains intellij-community — [FileDocumentManager.java: the File Cache Conflict policy (ASK by default)](https://github.com/JetBrains/intellij-community/blob/master/platform/core-api/src/com/intellij/openapi/fileEditor/FileDocumentManager.java)
-10. Neovim documentation — [editing: the W12 "file changed" warning](https://neovim.io/doc/user/editing.html)
+10. Neovim documentation — [editing: the timestamp check before writing ("The file has been changed since reading it!!! … (y/n)")](https://neovim.io/doc/user/editing.html)
