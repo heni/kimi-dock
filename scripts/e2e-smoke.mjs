@@ -204,14 +204,17 @@ try {
     )
   }
 
-  // 7b) External-change invalidation (3.9.1): with a file open, an outside
-  // write to it must show up in the editor after leaving and re-entering
-  // the surface (activation revalidation); the draft-conflict lifecycle
-  // (banner → Keep → suppression re-arm → Load) rides the same setup. The
-  // harness writes the file bytes directly — bypassing the app's FS
-  // gateway, a genuinely external change — and restores them in the
-  // finally. The first picker item is the first non-hidden directory of
-  // the workspace root (the gateway sorts directories first by name).
+  // 7b) External-change invalidation (3.9.1) + save-time guard (3.9.2):
+  // with a file open, an outside write to it must show up in the editor
+  // after leaving and re-entering the surface (activation revalidation);
+  // the draft-conflict lifecycle (banner → Keep → suppression re-arm →
+  // Load) rides the same setup, and a Ctrl+S with a pending divergence
+  // must ask (native dialog, driven by a main-process patch) instead of
+  // silently overwriting. The harness writes the file bytes directly —
+  // bypassing the app's FS gateway, a genuinely external change — and
+  // restores them in the finally. The first picker item is the first
+  // non-hidden directory of the workspace root (the gateway sorts
+  // directories first by name).
   let invalidationDone = false
   const settingsForWs = await window.evaluate(() => window.api.getSettings())
   const workspaceRoot = settingsForWs?.workspaceRoot
@@ -299,6 +302,153 @@ try {
           )
           if (!typedGone) throw new Error('Load disk version kept the draft text')
           console.log('[e2e] Conflict lifecycle OK (raise → keep → re-arm → load)')
+
+          // Save-time guard (3.9.2): Ctrl+S with a pending divergence must
+          // not silently overwrite the newer disk version — the native
+          // question decides (Cancel keeps the disk, Overwrite lands the
+          // draft, Load drops the draft for a fresh read); a clean stale
+          // buffer reloads silently. The dialog is driven by patching
+          // dialog.showMessageBox in the main process (restored in the
+          // inner finally, so the exit dialog keeps working afterwards).
+          const dialogPatched = await app.evaluate(({ dialog }) => {
+            const g = globalThis
+            g.__origShowMessageBox = dialog.showMessageBox
+            g.__dialogResponses = []
+            g.__dialogCalls = []
+            const mock = async (opts) => {
+              const resp = g.__dialogResponses.shift() ?? 2
+              g.__dialogCalls.push({ m: opts?.message ?? '?', t: Date.now(), resp })
+              return { response: resp, checkboxChecked: false }
+            }
+            dialog.showMessageBox = mock
+            // A silently failed assignment (non-writable property) would
+            // surface as a real native dialog and a hung run — verify.
+            return dialog.showMessageBox === mock
+          })
+          if (!dialogPatched) {
+            throw new Error('could not patch dialog.showMessageBox in the main process')
+          }
+          const pushDialogResponse = (response) =>
+            // electronApp.evaluate passes (electron, arg) — the response
+            // is the SECOND parameter.
+            app.evaluate((_electron, r) => globalThis.__dialogResponses.push(r), response)
+          const dialogCallCount = () => app.evaluate(() => globalThis.__dialogCalls.length)
+          const diskHas = async (text, want, timeoutMs = 5000) => {
+            const deadline = Date.now() + timeoutMs
+            for (;;) {
+              const has = fs.readFileSync(absPath, 'utf8').includes(text)
+              if (has === want) return true
+              if (Date.now() > deadline) return false
+              await new Promise((r) => setTimeout(r, 100))
+            }
+          }
+          try {
+            const guardMarker = `guard-${Date.now()}`
+            await window.click('.cm-line >> nth=-1')
+            await window.keyboard.press('Control+End')
+            await window.keyboard.type(guardMarker)
+            fs.appendFileSync(absPath, `\nexternal-guard-marker-${Date.now()}\n`)
+            // Key delivery log for the failure dumps below.
+            await window.evaluate(() => {
+              const w = window
+              w.__keyLog = []
+              w.addEventListener(
+                'keydown',
+                (e) => w.__keyLog.push(`${e.key}:ctrl=${e.ctrlKey}:dp=${e.defaultPrevented}`),
+                true
+              )
+            })
+            // Cancel: the draft must NOT reach the disk.
+            await pushDialogResponse(2)
+            await window.keyboard.press('Control+s')
+            const cancelDeadline = Date.now() + 5000
+            while ((await dialogCallCount()) < 1) {
+              if (Date.now() > cancelDeadline) {
+                throw new Error('save-time guard did not ask on Ctrl+S')
+              }
+              await new Promise((r) => setTimeout(r, 100))
+            }
+            if (fs.readFileSync(absPath, 'utf8').includes(guardMarker)) {
+              throw new Error('Cancel still wrote the draft to disk')
+            }
+            console.log('[e2e] Save-time guard: Cancel kept the disk version untouched')
+            // Overwrite: the draft lands, the editor goes clean.
+            await pushDialogResponse(0)
+            await window.keyboard.press('Control+s')
+            if (!(await diskHas(guardMarker, true))) {
+              const debug = {
+                dialogCalls: await app.evaluate(() => globalThis.__dialogCalls ?? []),
+                queueLeft: await app.evaluate(() => (globalThis.__dialogResponses ?? []).length),
+                keyLog: await window.evaluate(() => window.__keyLog ?? null),
+                editorError: await window.evaluate(
+                  () => document.querySelector('.editor-error')?.textContent ?? null
+                ),
+                saveDisabled: await window.evaluate(() => {
+                  const save = document.querySelector('.editor-save')
+                  return save instanceof HTMLButtonElement ? save.disabled : null
+                }),
+                bannerVisible: await window.isVisible('.disk-conflict'),
+                bufferHasMarker: await window.evaluate(
+                  (expected) =>
+                    document.querySelector('.cm-content')?.textContent?.includes(expected) ?? null,
+                  guardMarker
+                ),
+                diskTail: fs.readFileSync(absPath, 'utf8').slice(-160)
+              }
+              console.log('[e2e] Overwrite debug:', JSON.stringify(debug))
+              throw new Error('Overwrite did not write the draft')
+            }
+            await window.waitForSelector('.editor-save:disabled', { timeout: 5000 })
+            console.log('[e2e] Save-time guard: Overwrite wrote the draft')
+
+            // Load (answer 1): the draft is dropped, the buffer takes a
+            // fresh disk read, nothing is written.
+            const loadMarker = `load-${Date.now()}`
+            await window.click('.cm-line >> nth=-1')
+            await window.keyboard.press('Control+End')
+            await window.keyboard.type(loadMarker)
+            const extBeforeLoad = `external-load-marker-${Date.now()}`
+            fs.appendFileSync(absPath, `\n${extBeforeLoad}\n`)
+            await pushDialogResponse(1)
+            await window.keyboard.press('Control+s')
+            await scrollAndHas(extBeforeLoad) // buffer took the fresh read
+            const loadDropped = await window.evaluate(
+              (expected) => !document.querySelector('.cm-content')?.textContent?.includes(expected),
+              loadMarker
+            )
+            if (!loadDropped) throw new Error('Load kept the draft text in the buffer')
+            if (fs.readFileSync(absPath, 'utf8').includes(loadMarker)) {
+              throw new Error('Load wrote the draft to disk')
+            }
+            console.log('[e2e] Save-time guard: Load dropped the draft, took the disk')
+
+            // Clean-stale reload: no draft, the disk moves, Ctrl+S asks
+            // nothing and writes nothing — a wrong write here would
+            // clobber the just-appended marker.
+            const callsBefore = await dialogCallCount()
+            const staleMarker = `external-stale-marker-${Date.now()}`
+            fs.appendFileSync(absPath, `\n${staleMarker}\n`)
+            await window.keyboard.press('Control+s')
+            await scrollAndHas(staleMarker)
+            if ((await dialogCallCount()) !== callsBefore) {
+              throw new Error('Clean-stale save asked the conflict question')
+            }
+            if (!fs.readFileSync(absPath, 'utf8').includes(staleMarker)) {
+              throw new Error('Clean-stale save clobbered the newer disk version')
+            }
+            await window.waitForSelector('.editor-save:disabled', { timeout: 5000 })
+            console.log('[e2e] Save-time guard: clean-stale save reloaded silently')
+          } finally {
+            await app.evaluate(({ dialog }) => {
+              const g = globalThis
+              if (g.__origShowMessageBox) {
+                dialog.showMessageBox = g.__origShowMessageBox
+                delete g.__origShowMessageBox
+                delete g.__dialogResponses
+                delete g.__dialogCalls
+              }
+            })
+          }
         }
       } finally {
         // Best-effort: leave no draft or open conflict behind — a dirty
@@ -311,6 +461,15 @@ try {
             await window.click('.editor-toggle', { timeout: 3000 })
             await window.waitForSelector('.editor-view', { timeout: 3000 })
           }
+          // Force a revalidation (hide + show): a conflict pending WITHOUT
+          // a visible banner (no trigger fired since the external write)
+          // must surface now — clicking Save over it would pop the native
+          // save-time dialog and wedge the cleanup.
+          await window.click('.editor-toggle', { timeout: 3000 })
+          await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 3000 })
+          await window.click('.editor-toggle', { timeout: 3000 })
+          await window.waitForSelector('.editor-view', { timeout: 3000 })
+          await window.waitForSelector('.disk-conflict', { timeout: 2000 }).catch(() => null)
           if (await window.isVisible('.disk-conflict')) {
             await window.click('.disk-conflict-actions button:first-child', { timeout: 3000 })
             await window

@@ -184,6 +184,9 @@ let unsavedDraftCount = 0
 // One exit question at a time: a close request arriving while the dialog
 // is up must not stack another one.
 let exitDialogInFlight = false
+// Same single-instance rule for the save-time conflict question (the
+// renderer has its own ref guard; this backstops it).
+let saveConflictDialogInFlight = false
 let saveWindowStateTimer: NodeJS.Timeout | null = null
 
 // Default window state
@@ -690,6 +693,35 @@ ipcMain.handle('show-open-dialog', async (_, options) => {
   if (!isRecord(options)) return { canceled: true }
   const result = await dialog.showOpenDialog(mainWindow, options as Electron.OpenDialogOptions)
   return result
+})
+
+// Save-time conflict question: the renderer's save path read the disk and
+// found it newer than the draft's baseline. Native and parentless (a
+// window-modal dialog on a close-prevented window was the suspected
+// trigger of GNOME's "not responding" banner), so it works from any
+// surface — plain Ctrl+S saves even while the chat surface is visible.
+ipcMain.handle('confirm-save-conflict', async (_, fileName: unknown) => {
+  if (typeof fileName !== 'string') return 'cancel'
+  if (saveConflictDialogInFlight) return 'cancel'
+  saveConflictDialogInFlight = true
+  try {
+    const { response } = await dialog.showMessageBox({
+      type: 'warning',
+      buttons: ['Overwrite Disk Version', 'Load Disk Version', 'Cancel'],
+      // Cancel is the default: Enter must not clobber the newer disk
+      // version, and Esc means "keep my draft, save nothing".
+      defaultId: 2,
+      cancelId: 2,
+      title: 'File changed on disk',
+      message: `“${fileName}” changed on disk`,
+      detail:
+        'The disk version is newer than the one your unsaved draft is based on (AI assistant or an external program). ' +
+        'Overwriting replaces it with your draft; loading discards your draft.'
+    })
+    return response === 0 ? 'overwrite' : response === 1 ? 'load' : 'cancel'
+  } finally {
+    saveConflictDialogInFlight = false
+  }
 })
 
 // Settings IPC handlers - FIXED: Proper async handlers
