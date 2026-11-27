@@ -115,10 +115,11 @@ agree on four rules:
 Here: revalidation on surface activation, window focus and run-help
 writes reloads clean buffers and raises the conflict banner over a
 diverged draft (the edit-time camp); the save-time guard reads the disk
-before every write — single-file and save-all — and asks natively
-(Overwrite / Load / Cancel, Cancel the default) from any surface; "Keep
-my draft" suppresses exactly the shown disk version, so a later save
-overwrites without re-asking (ignore-then-save).
+before every write — single-file and save-all. The single-file save asks
+natively (Overwrite / Load / Cancel, Cancel the default) from any
+surface; save-all skips and reports the diverged drafts instead of
+asking. "Keep my draft" suppresses exactly the shown disk version, so a
+later save overwrites without re-asking (ignore-then-save).
 
 ## 8. Where this lives in the code
 

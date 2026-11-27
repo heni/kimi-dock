@@ -273,22 +273,25 @@ export default function EditorView({
   // dialog. The content is always re-read at decision time — the banner
   // or the dialog may have sat while the disk moved again, and applying
   // the stale snapshot would let the next save silently clobber that
-  // newer version.
+  // newer version. Returns whether the disk version landed (the save
+  // path reports it to RunPanel: a successful load leaves the file on
+  // disk ready to run, exactly like the clean-stale reload).
   const loadFreshDiskVersion = useCallback(
-    async (path: string): Promise<void> => {
-      if (!activeChatId) return
+    async (path: string): Promise<boolean> => {
+      if (!activeChatId) return false
       const fresh = await window.api?.fsRead(`${activeChatId}/${path}`)
-      if (currentFileRef.current !== path) return // switched away mid-read
+      if (currentFileRef.current !== path) return false // switched away mid-read
       if (fresh?.success && fresh.content !== undefined) {
         clearDraft(activeChatId, path)
         suppressedDiskRef.current.delete(path)
         setFileContent(fresh.content)
         setSavedContent(fresh.content)
         setDiskConflict((current) => (current?.path === path ? null : current))
-      } else {
-        // Keep the draft and leave the conflict up — the user can retry.
-        setError(fresh?.error ?? 'Failed to load the disk version')
+        return true
       }
+      // Keep the draft and leave the conflict up — the user can retry.
+      setError(fresh?.error ?? 'Failed to load the disk version')
+      return false
     },
     [activeChatId]
   )
@@ -300,8 +303,10 @@ export default function EditorView({
   // the revalidation uses: a clean stale buffer just takes the disk
   // version (nothing to save), a diverged draft raises the native
   // question — it works from any surface, unlike the banner. The ref
-  // guards reentrancy: a second save while the question is up must not
-  // stack another dialog.
+  // only narrows the reentrancy window (it is set after the guard read
+  // resolves): the actual no-stacked-dialogs guarantee is the main
+  // process's synchronous in-flight flag, which answers a racing second
+  // question with 'cancel'.
   const saveGuardRef = useRef(false)
   const saveCurrentFile = useCallback(async (): Promise<boolean> => {
     if (!activeChatId || !currentFile) return false
@@ -323,6 +328,7 @@ export default function EditorView({
         // nothing to save, and the file on disk is ready for RunPanel.
         setFileContent(disk.content)
         setSavedContent(disk.content)
+        setDiskConflict((current) => (current?.path === path ? null : current))
         return true
       }
       if (action.kind === 'conflict') {
@@ -335,8 +341,9 @@ export default function EditorView({
         }
         if (currentFileRef.current !== path) return false // switched mid-dialog
         if (choice === 'load') {
-          await loadFreshDiskVersion(path)
-          return false
+          // A successful load ends in the reload branch's state — the
+          // disk version is ready, so a pre-run save reports success.
+          return await loadFreshDiskVersion(path)
         }
         if (choice !== 'overwrite') return false // cancel, or the dialog failed
         // Overwrite: the user was shown the divergence and chose the

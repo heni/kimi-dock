@@ -207,9 +207,17 @@ function App(): React.JSX.Element {
 
   const handleDraftGuardSaveSwitch = useCallback(async (): Promise<void> => {
     if (!draftGuard || !editorChatId) return
-    const { failed } = await saveAllDrafts(editorChatId)
-    if (failed > 0) {
-      setDraftGuard({ ...draftGuard, error: `Failed to save ${failed} draft(s) — still here.` })
+    // The save-all guard skips drafts whose disk moved (suppressions live
+    // in EditorView and cannot apply here): skipping with a report is
+    // honest, switching as if everything saved is not.
+    const { failed, conflicts } = await saveAllDrafts(editorChatId)
+    if (failed > 0 || conflicts.length > 0) {
+      const parts: string[] = []
+      if (failed > 0) parts.push(`failed to save ${failed} draft(s)`)
+      if (conflicts.length > 0) {
+        parts.push(`${conflicts.length} changed on disk — resolve in the editor`)
+      }
+      setDraftGuard({ ...draftGuard, error: `${parts.join('; ')} — still here.` })
       return
     }
     const target = draftGuard.target
