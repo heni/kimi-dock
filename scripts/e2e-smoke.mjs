@@ -390,8 +390,7 @@ try {
                 bannerVisible: await window.isVisible('.disk-conflict'),
                 bufferHasMarker: await window.evaluate(
                   (expected) =>
-                    document.querySelector('.cm-content')?.textContent?.includes(expected) ??
-                    null,
+                    document.querySelector('.cm-content')?.textContent?.includes(expected) ?? null,
                   guardMarker
                 ),
                 diskTail: fs.readFileSync(absPath, 'utf8').slice(-160)
@@ -470,9 +469,7 @@ try {
           await window.waitForSelector('.editor-view', { state: 'hidden', timeout: 3000 })
           await window.click('.editor-toggle', { timeout: 3000 })
           await window.waitForSelector('.editor-view', { timeout: 3000 })
-          await window
-            .waitForSelector('.disk-conflict', { timeout: 2000 })
-            .catch(() => null)
+          await window.waitForSelector('.disk-conflict', { timeout: 2000 }).catch(() => null)
           if (await window.isVisible('.disk-conflict')) {
             await window.click('.disk-conflict-actions button:first-child', { timeout: 3000 })
             await window
