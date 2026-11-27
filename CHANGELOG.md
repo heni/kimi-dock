@@ -11,11 +11,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Save-time conflict guard** — a save never silently overwrites a disk
   version the buffer does not know (the editor consensus: VS Code asks
-  at save time, Sublime after an edit-time ignore, Vim warns with W12).
-  Every save reads the disk first and reconciles through the same
-  `decideExternalChange` the revalidation uses: a clean stale buffer
-  just takes the disk version; a draft whose disk moved away from its
-  baseline raises a native question — **Overwrite Disk Version** /
+  at save time, Sublime after an edit-time ignore, Vim on a moved
+  timestamp). Every save reads the disk first and reconciles through the
+  same decision the revalidation uses (`decideExternalChange` on the
+  single-file path, the same rule inline in save-all): a clean stale
+  buffer just takes the disk version; a draft whose disk moved away from
+  its baseline raises a native question — **Overwrite Disk Version** /
   **Load Disk Version** (a fresh read at click time) / **Cancel**
   (default) — that works from any surface, unlike the editor-surface
   banner. "Keep my draft" in the banner suppresses exactly the shown
@@ -24,7 +25,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (save-all) skips diverged drafts instead of writing them, reports
   them, and re-raises the banner for the open file.
 - e2e: the save-time guard step (Cancel leaves the disk untouched,
-  Overwrite lands the draft) with the native dialog driven by a
+  Overwrite lands the draft, Load takes a fresh disk read, a clean stale
+  buffer reloads silently) with the native dialog driven by a
   main-process patch.
 
 ## [3.9.1] - 2026-11-26

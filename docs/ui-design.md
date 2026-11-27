@@ -92,26 +92,23 @@ across switches. A CSS-hidden surface must gate its global listeners
 The open buffer is a cache of the disk, and the disk can move underneath
 it — another editor, git, a build, an AI assistant. The surveyed editors
 (VS Code, Sublime Text, Zed, JetBrains IDEs, Vim — sources [6]–[10])
-agree on four rules:
+agree on three rules:
 
 - **A clean buffer reloads silently.** With no unsaved work there is
   nothing to lose, so nobody asks — Sublime: "it only reloads without
   prompting when you have no unsaved changes" [6].
-- **A dirty buffer is never silently resolved.** Editors differ only in
-  WHEN they ask: at edit time (Sublime's reload/ignore choice [6],
-  JetBrains' File Cache Conflict dialog [9]) or at save time (VS Code
-  flags the divergence and asks on save [7]; Zed flags the buffer as
-  modified rather than reloading [8]; Vim checks the timestamp before
-  writing and asks y/n when it moved [10]). Asking at both points is
-  legitimate; asking at neither loses work.
+- **A dirty buffer is never silently resolved.** Editors differ in when
+  and how they surface the divergence: at edit time with a choice
+  (Sublime's reload/ignore [6], JetBrains' File Cache Conflict dialog
+  [9]), at change time with a flag (Zed marks the buffer modified
+  rather than reloading [8]), or at save time with a question (VS Code
+  [7], Vim's timestamp check with a y/n prompt [10]). Surfacing at both
+  edit and save time is legitimate; surfacing at neither loses work.
 - **A save never overwrites a newer disk version silently.** The user
   who was shown the divergence and chose their draft may overwrite
   (Sublime's ignore-then-save [6]); otherwise the question belongs at
   save time, with Cancel as the default — a save gesture must not become
   a clobber gesture [7].
-- **The view survives a reload.** Cursor and scroll position are
-  preserved approximately, so even a silent reload does not cost the
-  reader their place.
 
 Here: revalidation on surface activation, window focus and run-help
 writes reloads clean buffers and raises the conflict banner over a
