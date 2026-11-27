@@ -2,11 +2,12 @@
 
 Standing design doc for UI/UX work in Kimi Dock. Read it before planning any
 change that adds or modifies a user-visible surface or interaction; include
-the review checklist (§9) in the change's pull request description.
+the review checklist (§10) in the change's pull request description.
 
 Distilled primarily from the beUI guide _AI Chat UI in React_ [1], extended
-with the message-delivery discipline from [2][3] and the scroll-behavior
-canon from [4][5]. The rules are stated for this codebase; section 7 maps
+with the message-delivery discipline from [2][3], the scroll-behavior
+canon from [4][5] and the external-file-change consensus from [6]–[10].
+The rules are stated for this codebase; section 8 maps
 them to the files that implement them.
 
 ## 1. Surface anatomy
@@ -86,7 +87,40 @@ Keep-mounted surfaces (the webview, the artifact editor) keep their state
 across switches. A CSS-hidden surface must gate its global listeners
 (keydown and friends) on being active — hidden is not inert.
 
-## 7. Where this lives in the code
+## 7. External file changes
+
+The open buffer is a cache of the disk, and the disk can move underneath
+it — another editor, git, a build, an AI assistant. The surveyed editors
+(VS Code, Sublime Text, Zed, JetBrains IDEs, Vim — sources [6]–[10])
+agree on four rules:
+
+- **A clean buffer reloads silently.** With no unsaved work there is
+  nothing to lose, so nobody asks — Sublime: "it only reloads without
+  prompting when you have no unsaved changes" [6].
+- **A dirty buffer is never silently resolved.** Editors differ only in
+  WHEN they ask: at edit time (Sublime's reload/ignore choice [6],
+  JetBrains' File Cache Conflict dialog [9], Vim's W12 warning [10]) or
+  at save time (VS Code flags the divergence and asks on save [7]; Zed
+  flags the buffer as modified rather than reloading [8]). Asking at
+  both points is legitimate; asking at neither loses work.
+- **A save never overwrites a newer disk version silently.** The user
+  who was shown the divergence and chose their draft may overwrite
+  (Sublime's ignore-then-save [6]); otherwise the question belongs at
+  save time, with Cancel as the default — a save gesture must not become
+  a clobber gesture [7].
+- **The view survives a reload.** Cursor and scroll position are
+  preserved approximately, so even a silent reload does not cost the
+  reader their place.
+
+Here: revalidation on surface activation, window focus and run-help
+writes reloads clean buffers and raises the conflict banner over a
+diverged draft (the edit-time camp); the save-time guard reads the disk
+before every write — single-file and save-all — and asks natively
+(Overwrite / Load / Cancel, Cancel the default) from any surface; "Keep
+my draft" suppresses exactly the shown disk version, so a later save
+overwrites without re-asking (ignore-then-save).
+
+## 8. Where this lives in the code
 
 - Composer, stick-to-bottom, typing indicator (`.typing-indicator`), the
   streaming provisional bubble, and the send-error notice:
@@ -98,8 +132,14 @@ across switches. A CSS-hidden surface must gate its global listeners
   state); queue flow helpers: `src/renderer/src/utils/chatFlow.ts`.
 - Kept-mounted surfaces and their listener gating: `src/renderer/src/App.tsx`,
   `src/renderer/src/components/EditorView.tsx`.
+- External-change machinery (§7): the reconciliation decision:
+  `src/renderer/src/utils/editorSync.ts`; revalidation, the conflict
+  banner and the save-time guard: `src/renderer/src/components/
+  EditorView.tsx`; the save-all guard: `src/renderer/src/utils/
+  draftStore.ts`; the native question: `confirm-save-conflict` in
+  `src/main/index.ts`.
 
-## 8. Accessibility minimum
+## 9. Accessibility minimum
 
 - The transcript is a log region: `aria-live="polite"`, `aria-busy` while
   a reply runs; if a streaming component has its own live region, disable
@@ -109,7 +149,7 @@ across switches. A CSS-hidden surface must gate its global listeners
 - Respect reduced motion: pop-in animations and smooth scrolling degrade
   to instant.
 
-## 9. Review checklist for UI units
+## 10. Review checklist for UI units
 
 Paste this checklist into the pull request description of any UI change;
 whoever reviews the change — human or an automated review pass — walks it
@@ -125,6 +165,9 @@ item by item.
 - [ ] Every async action has visible status; errors say what/why/next
 - [ ] Surface switching preserves state; hidden surfaces gate global
       listeners
+- [ ] External file changes: clean buffers reload silently; a diverged
+      draft is never silently resolved; a save never overwrites a newer
+      disk version silently
 - [ ] a11y: log region, labels, reduced motion
 
 ## Sources
@@ -134,3 +177,8 @@ item by item.
 3. Jonas Stamm — [The Nightmare of Optimistic UI in Chat Apps](https://www.jonasstamm.com/optimistic-ui-chat-apps)
 4. Devin Schulz — [Building a Chat Interface That Doesn't Fight Your Scroll Position](https://devinschulz.com/blog/building-a-chat-interface-that-doesnt-fight-your-scroll-position/)
 5. OpenCode Portal — [Chat Interface](https://hosenur-portal.mintlify.app/features/chat-interface)
+6. Sublime Text Forum — [alert instead of auto-refresh on external change](https://forum.sublimetext.com/t/9046) ("never silently discard your changes… only reloads without prompting when you have no unsaved changes")
+7. microsoft/vscode — [issue #100504: file changed on disk, the save-over risk](https://github.com/microsoft/vscode/issues/100504)
+8. zed-industries/zed — [issue #6260: a changed-on-disk buffer is flagged as modified, not silently reloaded](https://github.com/zed-industries/zed/issues/6260)
+9. JetBrains intellij-community — [FileDocumentManager.java: the File Cache Conflict policy (ASK by default)](https://github.com/JetBrains/intellij-community/blob/master/platform/core-api/src/com/intellij/openapi/fileEditor/FileDocumentManager.java)
+10. Neovim documentation — [editing: the W12 "file changed" warning](https://neovim.io/doc/user/editing.html)

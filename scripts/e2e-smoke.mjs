@@ -204,14 +204,17 @@ try {
     )
   }
 
-  // 7b) External-change invalidation (3.9.1): with a file open, an outside
-  // write to it must show up in the editor after leaving and re-entering
-  // the surface (activation revalidation); the draft-conflict lifecycle
-  // (banner → Keep → suppression re-arm → Load) rides the same setup. The
-  // harness writes the file bytes directly — bypassing the app's FS
-  // gateway, a genuinely external change — and restores them in the
-  // finally. The first picker item is the first non-hidden directory of
-  // the workspace root (the gateway sorts directories first by name).
+  // 7b) External-change invalidation (3.9.1) + save-time guard (3.9.2):
+  // with a file open, an outside write to it must show up in the editor
+  // after leaving and re-entering the surface (activation revalidation);
+  // the draft-conflict lifecycle (banner → Keep → suppression re-arm →
+  // Load) rides the same setup, and a Ctrl+S with a pending divergence
+  // must ask (native dialog, driven by a main-process patch) instead of
+  // silently overwriting. The harness writes the file bytes directly —
+  // bypassing the app's FS gateway, a genuinely external change — and
+  // restores them in the finally. The first picker item is the first
+  // non-hidden directory of the workspace root (the gateway sorts
+  // directories first by name).
   let invalidationDone = false
   const settingsForWs = await window.evaluate(() => window.api.getSettings())
   const workspaceRoot = settingsForWs?.workspaceRoot
@@ -299,6 +302,73 @@ try {
           )
           if (!typedGone) throw new Error('Load disk version kept the draft text')
           console.log('[e2e] Conflict lifecycle OK (raise → keep → re-arm → load)')
+
+          // Save-time guard (3.9.2): Ctrl+S with a pending divergence must
+          // not silently overwrite the newer disk version — the native
+          // question decides. The dialog is driven by patching
+          // dialog.showMessageBox in the main process (restored in the
+          // inner finally, so the exit dialog keeps working afterwards).
+          await app.evaluate(({ dialog }) => {
+            const g = globalThis
+            g.__origShowMessageBox = dialog.showMessageBox
+            g.__dialogResponses = []
+            g.__dialogCalls = []
+            dialog.showMessageBox = async (opts) => {
+              g.__dialogCalls.push(opts)
+              return { response: g.__dialogResponses.shift() ?? 2, checkboxChecked: false }
+            }
+          })
+          const pushDialogResponse = (response) =>
+            app.evaluate((r) => globalThis.__dialogResponses.push(r), response)
+          const dialogCallCount = () => app.evaluate(() => globalThis.__dialogCalls.length)
+          const diskHas = async (text, want, timeoutMs = 5000) => {
+            const deadline = Date.now() + timeoutMs
+            for (;;) {
+              const has = fs.readFileSync(absPath, 'utf8').includes(text)
+              if (has === want) return true
+              if (Date.now() > deadline) return false
+              await new Promise((r) => setTimeout(r, 100))
+            }
+          }
+          try {
+            const guardMarker = `guard-${Date.now()}`
+            await window.click('.cm-line >> nth=-1')
+            await window.keyboard.press('Control+End')
+            await window.keyboard.type(guardMarker)
+            fs.appendFileSync(absPath, `\nexternal-guard-marker-${Date.now()}\n`)
+            // Cancel: the draft must NOT reach the disk.
+            await pushDialogResponse(2)
+            await window.keyboard.press('Control+s')
+            const cancelDeadline = Date.now() + 5000
+            while ((await dialogCallCount()) < 1) {
+              if (Date.now() > cancelDeadline) {
+                throw new Error('save-time guard did not ask on Ctrl+S')
+              }
+              await new Promise((r) => setTimeout(r, 100))
+            }
+            if (fs.readFileSync(absPath, 'utf8').includes(guardMarker)) {
+              throw new Error('Cancel still wrote the draft to disk')
+            }
+            console.log('[e2e] Save-time guard: Cancel kept the disk version untouched')
+            // Overwrite: the draft lands, the editor goes clean.
+            await pushDialogResponse(0)
+            await window.keyboard.press('Control+s')
+            if (!(await diskHas(guardMarker, true))) {
+              throw new Error('Overwrite did not write the draft')
+            }
+            await window.waitForSelector('.editor-save:disabled', { timeout: 5000 })
+            console.log('[e2e] Save-time guard: Overwrite wrote the draft')
+          } finally {
+            await app.evaluate(({ dialog }) => {
+              const g = globalThis
+              if (g.__origShowMessageBox) {
+                dialog.showMessageBox = g.__origShowMessageBox
+                delete g.__origShowMessageBox
+                delete g.__dialogResponses
+                delete g.__dialogCalls
+              }
+            })
+          }
         }
       } finally {
         // Best-effort: leave no draft or open conflict behind — a dirty

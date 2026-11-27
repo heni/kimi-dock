@@ -121,7 +121,12 @@ Rules:
   banner** (3.9.1) — "Load disk version" / "Keep my draft" — instead of
   silently masking the disk; clean buffers simply reload on surface
   activation, window focus and run-help writes
-  (`utils/editorSync.ts` decides).
+  (`utils/editorSync.ts` decides). The **save-time guard** (3.9.2) closes
+  the remaining hole: every save (single-file and Ctrl+K S) reads the
+  disk first and reconciles through the same decision — a diverged,
+  unsuppressed draft is never written silently; the single-file save
+  asks via a native dialog (Overwrite / Load / Cancel) that works from
+  any surface, save-all skips and reports the diverged drafts.
 - **Workspace root** (_workspace folder_) — the user-chosen directory that
   holds every chat's artifact directory; persisted as `workspaceRoot` in
   `settings.json`. The renderer reaches it only through the main-process FS

@@ -1,6 +1,6 @@
 /*
- * Unit tests for the in-memory draft store (pure part; saveAllDrafts needs
- * window.api and is exercised manually). Run: npm run test:unit
+ * Unit tests for the in-memory draft store (window.api is mocked where a
+ * path needs it). Run: npm run test:unit
  */
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
@@ -100,4 +100,63 @@ test('resolveSave: raced keystroke survives, re-based onto disk', async () => {
   resolveSave('t7', 'b.md', 'x')
   assert.equal(hasDraft('t7', 'b.md'), false)
   clearDraft('t7', 'a.md')
+})
+
+test('saveAllDrafts guard: diverged disk skips the draft, reports a conflict', async () => {
+  const writes = []
+  globalThis.window = {
+    api: {
+      fsRead: async (path) =>
+        path.endsWith('moved.md')
+          ? { success: true, content: 'disk-v2' } // moved since the baseline
+          : { success: true, content: 'd' }, // baseline intact
+      fsWrite: async (path, content) => {
+        writes.push([path, content])
+        return { success: true }
+      }
+    }
+  }
+  const { saveAllDrafts } = await import('../.tmp/unit-build/renderer/src/utils/draftStore.js')
+  setDraft('t8', 'moved.md', 'mine', 'd')
+  setDraft('t8', 'calm.md', 'mine2', 'd')
+  const { saved, failed, conflicts } = await saveAllDrafts('t8')
+  assert.equal(saved, 1)
+  assert.equal(failed, 0)
+  assert.deepEqual(conflicts, ['moved.md'])
+  assert.equal(hasDraft('t8', 'moved.md'), true, 'skipped draft kept')
+  assert.equal(hasDraft('t8', 'calm.md'), false, 'clean-baseline draft saved')
+  assert.deepEqual(writes, [['t8/calm.md', 'mine2']], 'the diverged file is never written')
+  clearDraft('t8', 'moved.md')
+  delete globalThis.window
+})
+
+test('saveAllDrafts guard: a suppressed disk version writes; a failed read writes', async () => {
+  const writes = []
+  globalThis.window = {
+    api: {
+      fsRead: async (path) =>
+        path.endsWith('gone.md')
+          ? { success: false, error: 'ENOENT' } // deleted externally
+          : { success: true, content: 'disk-v2' },
+      fsWrite: async (path, content) => {
+        writes.push([path, content])
+        return { success: true }
+      }
+    }
+  }
+  const { saveAllDrafts } = await import('../.tmp/unit-build/renderer/src/utils/draftStore.js')
+  setDraft('t9', 'kept.md', 'mine', 'd')
+  setDraft('t9', 'gone.md', 'mine2', 'd')
+  const { saved, failed, conflicts } = await saveAllDrafts(
+    't9',
+    (path, diskContent) => path === 'kept.md' && diskContent === 'disk-v2'
+  )
+  assert.equal(saved, 2, 'suppressed + unreadable both write')
+  assert.equal(failed, 0)
+  assert.deepEqual(conflicts, [])
+  assert.deepEqual(writes, [
+    ['t9/kept.md', 'mine'],
+    ['t9/gone.md', 'mine2']
+  ])
+  delete globalThis.window
 })

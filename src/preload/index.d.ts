@@ -39,6 +39,8 @@ declare global {
       showOpenDialog: (
         options: Electron.OpenDialogOptions
       ) => Promise<Electron.OpenDialogReturnValue>
+      // Save-time conflict question (native, works from any surface)
+      confirmSaveConflict: (fileName: string) => Promise<'overwrite' | 'load' | 'cancel'>
 
       // Settings management
       getSettings: () => Promise<any>

@@ -46,6 +46,9 @@ contextBridge.exposeInMainWorld('api', {
     ipcRenderer.invoke('show-save-dialog', options),
   showOpenDialog: (options: Electron.OpenDialogOptions): Promise<Electron.OpenDialogReturnValue> =>
     ipcRenderer.invoke('show-open-dialog', options),
+  // Save-time conflict question (native, works from any surface)
+  confirmSaveConflict: (fileName: string): Promise<'overwrite' | 'load' | 'cancel'> =>
+    ipcRenderer.invoke('confirm-save-conflict', fileName),
 
   // Settings management
   getSettings: (): Promise<unknown> => ipcRenderer.invoke('get-settings'),

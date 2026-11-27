@@ -100,13 +100,34 @@ export function clearAllDrafts(): void {
 // other chats are never touched). Entries clear on successful writes
 // (keystrokes racing the write survive, re-based); failures keep their
 // drafts and are reported by count.
-export async function saveAllDrafts(chatId: string): Promise<{ saved: number; failed: number }> {
+//
+// Save-time guard, same rule as the editor's single-file save: a draft
+// whose disk moved away from its baseline is SKIPPED and reported in
+// `conflicts`, never silently written — unless `isSuppressed` says the
+// user already kept the draft over exactly this disk version. A failed
+// guard read (e.g. the file was deleted externally) keeps the old
+// behavior and writes.
+export async function saveAllDrafts(
+  chatId: string,
+  isSuppressed?: (path: string, diskContent: string) => boolean
+): Promise<{ saved: number; failed: number; conflicts: string[] }> {
   const prefix = `${chatId}\u0000`
   let saved = 0
   let failed = 0
+  const conflicts: string[] = []
   for (const [k, draft] of [...drafts.entries()]) {
     if (!k.startsWith(prefix)) continue
     const path = k.slice(prefix.length)
+    const disk = await window.api?.fsRead?.(`${chatId}/${path}`)
+    if (
+      disk?.success &&
+      disk.content !== undefined &&
+      disk.content !== draft.base &&
+      !(isSuppressed?.(path, disk.content) ?? false)
+    ) {
+      conflicts.push(path)
+      continue
+    }
     const result = await window.api?.fsWrite(`${chatId}/${path}`, draft.content)
     if (result?.success) {
       resolveSave(chatId, path, draft.content)
@@ -115,5 +136,5 @@ export async function saveAllDrafts(chatId: string): Promise<{ saved: number; fa
       failed += 1
     }
   }
-  return { saved, failed }
+  return { saved, failed, conflicts }
 }
