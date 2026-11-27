@@ -316,8 +316,9 @@ try {
             g.__dialogResponses = []
             g.__dialogCalls = []
             const mock = async (opts) => {
-              g.__dialogCalls.push(opts)
-              return { response: g.__dialogResponses.shift() ?? 2, checkboxChecked: false }
+              const resp = g.__dialogResponses.shift() ?? 2
+              g.__dialogCalls.push({ m: opts?.message ?? '?', t: Date.now(), resp })
+              return { response: resp, checkboxChecked: false }
             }
             dialog.showMessageBox = mock
             // A silently failed assignment (non-writable property) would
@@ -328,7 +329,9 @@ try {
             throw new Error('could not patch dialog.showMessageBox in the main process')
           }
           const pushDialogResponse = (response) =>
-            app.evaluate((r) => globalThis.__dialogResponses.push(r), response)
+            // electronApp.evaluate passes (electron, arg) — the response
+            // is the SECOND parameter.
+            app.evaluate((_electron, r) => globalThis.__dialogResponses.push(r), response)
           const dialogCallCount = () => app.evaluate(() => globalThis.__dialogCalls.length)
           const diskHas = async (text, want, timeoutMs = 5000) => {
             const deadline = Date.now() + timeoutMs
@@ -345,6 +348,16 @@ try {
             await window.keyboard.press('Control+End')
             await window.keyboard.type(guardMarker)
             fs.appendFileSync(absPath, `\nexternal-guard-marker-${Date.now()}\n`)
+            // Key delivery log for the failure dumps below.
+            await window.evaluate(() => {
+              const w = window
+              w.__keyLog = []
+              w.addEventListener(
+                'keydown',
+                (e) => w.__keyLog.push(`${e.key}:ctrl=${e.ctrlKey}:dp=${e.defaultPrevented}`),
+                true
+              )
+            })
             // Cancel: the draft must NOT reach the disk.
             await pushDialogResponse(2)
             await window.keyboard.press('Control+s')
@@ -363,6 +376,27 @@ try {
             await pushDialogResponse(0)
             await window.keyboard.press('Control+s')
             if (!(await diskHas(guardMarker, true))) {
+              const debug = {
+                dialogCalls: await app.evaluate(() => globalThis.__dialogCalls ?? []),
+                queueLeft: await app.evaluate(() => (globalThis.__dialogResponses ?? []).length),
+                keyLog: await window.evaluate(() => window.__keyLog ?? null),
+                editorError: await window.evaluate(
+                  () => document.querySelector('.editor-error')?.textContent ?? null
+                ),
+                saveDisabled: await window.evaluate(() => {
+                  const save = document.querySelector('.editor-save')
+                  return save instanceof HTMLButtonElement ? save.disabled : null
+                }),
+                bannerVisible: await window.isVisible('.disk-conflict'),
+                bufferHasMarker: await window.evaluate(
+                  (expected) =>
+                    document.querySelector('.cm-content')?.textContent?.includes(expected) ??
+                    null,
+                  guardMarker
+                ),
+                diskTail: fs.readFileSync(absPath, 'utf8').slice(-160)
+              }
+              console.log('[e2e] Overwrite debug:', JSON.stringify(debug))
               throw new Error('Overwrite did not write the draft')
             }
             await window.waitForSelector('.editor-save:disabled', { timeout: 5000 })
