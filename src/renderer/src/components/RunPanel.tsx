@@ -289,7 +289,7 @@ export default function RunPanel({
           onClick={handleAskAi}
           disabled={askDisabled}
           title={askTitle}
-          aria-label="Ask AI about this run"
+          aria-label={!currentFile ? 'Ask AI — bootstrap this chat’s first artifact' : 'Ask AI about this run'}
         >
           ✨ Ask AI
         </button>

@@ -388,40 +388,27 @@ export default function KimiWebView({
         }>((resolve, reject) => {
           streamWaitersRef.current.set(requestId, { resolve, reject })
         })
-        const startStream = (
-          degraded: boolean
-        ): Promise<{ success: boolean; error?: string; code?: string } | undefined> =>
-          window.api?.kimiApiStreamStart?.({
+        // 3.9.4: a missing chat dir is accepted (the tools bootstrap it on
+        // the first write), so there is no degrade-to-plain retry here —
+        // a start failure surfaces as the request error. The buffers push
+        // makes the tools read the live editor drafts of this chat, not
+        // the stale disk — a fresh snapshot per pass.
+        let startResult: { success: boolean; error?: string; code?: string } | undefined
+        try {
+          startResult = await window.api?.kimiApiStreamStart?.({
             requestId,
             body: {
               model,
               messages: [
-                ...(toolsChatId && !degraded ? [{ role: 'system', content: RUN_HELP_SKILL }] : []),
+                ...(toolsChatId ? [{ role: 'system', content: RUN_HELP_SKILL }] : []),
                 ...(runSkillArmedRef.current ? [{ role: 'system', content: RUN_JSON_SKILL }] : []),
                 ...apiMessages
               ]
             },
-            // The buffers push makes the tools read the live editor drafts
-            // of this chat, not the stale disk — a fresh snapshot per pass.
-            ...(toolsChatId && !degraded
+            ...(toolsChatId
               ? { runHelp: { chatId: toolsChatId, buffers: collectRunHelpBuffers(toolsChatId) } }
               : {})
           })
-        let startResult: { success: boolean; error?: string; code?: string } | undefined
-        try {
-          startResult = await startStream(false)
-          // A marked conversation whose chat dir vanished (external
-          // deletion, workspace change) must not brick: degrade to a
-          // plain request — no tools, no skill — instead of failing
-          // every pass forever. The validation failure happens before
-          // main registers the stream, so the requestId is reusable.
-          if (
-            !startResult?.success &&
-            toolsChatId &&
-            startResult?.code === 'RUN_HELP_CHAT_DIR_MISSING'
-          ) {
-            startResult = await startStream(true)
-          }
         } catch (error) {
           // A start that throws must not orphan the parked waiter.
           streamWaitersRef.current.delete(requestId)

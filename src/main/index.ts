@@ -1072,6 +1072,12 @@ async function runChatStream(
               `${rel} has unsaved changes in the user's editor. Ask the user to save (Ctrl+S) or discard them, then retry the write.`
             )
           }
+          // A brand-new chat has no directory yet: create the confined
+          // root before the realpath confinement, which would throw
+          // ENOENT on a missing dir (3.9.4: the first artifact
+          // bootstraps the directory). chatDir is lexically confined by
+          // resolveChatDir.
+          fs.mkdirSync(chatDir, { recursive: true })
           resolveInWorkspaceReal(chatDir, rel, true)
           writeTextFile(chatDir, rel, content)
           // The editor reconciles the open file conflict-aware on this
