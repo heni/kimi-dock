@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { buildRunHelpTrigger, selectRunHelpContext, RunExit } from '../utils/runHelp'
+import { buildFirstArtifactTrigger, buildRunHelpTrigger, selectRunHelpContext, RunExit } from '../utils/runHelp'
 import { hasDraft } from '../utils/draftStore'
 
 type ResolvedRun = {
@@ -234,10 +234,15 @@ export default function RunPanel({
   // must not leak into the trigger or the attention highlight.
   const exitForFile = lastExit && lastExit.file === currentFile ? lastExit : null
 
-  // ✨ Ask AI: diagnose the last run (or explain the program) in the chat.
-  // Alt+click asks in a fresh chat instead of the artifact's own one.
+  // ✨ Ask AI: diagnose the last run (or explain the program) in the chat;
+  // with no file open yet it bootstraps the chat's first artifact — the
+  // tools create the directory on demand (3.9.4). Alt+click asks in a
+  // fresh chat instead of the artifact's own one.
   const handleAskAi = (event: React.MouseEvent): void => {
-    if (!currentFile) return
+    if (!currentFile) {
+      onAskAi({ text: buildFirstArtifactTrigger(), newChat: event.altKey })
+      return
+    }
     const useSpec = resolved && command.trim() === resolved.spec.command
     onAskAi({
       text: buildRunHelpTrigger({
@@ -261,11 +266,11 @@ export default function RunPanel({
     })
   }
 
-  const askDisabled = !hasSession || !currentFile
+  const askDisabled = !hasSession
   const askTitle = !hasSession
     ? 'Log in with your Kimi account (Settings → Kimi Account) to ask AI'
     : !currentFile
-      ? 'Open a file to ask about it'
+      ? 'Ask AI — it can create this chat’s first artifact (the directory appears on the first write)'
       : 'Ask AI about this run in the chat (Alt+click: in a new chat)'
 
   return (
@@ -284,7 +289,7 @@ export default function RunPanel({
           onClick={handleAskAi}
           disabled={askDisabled}
           title={askTitle}
-          aria-label="Ask AI about this run"
+          aria-label={!currentFile ? 'Ask AI — bootstrap this chat’s first artifact' : 'Ask AI about this run'}
         >
           ✨ Ask AI
         </button>

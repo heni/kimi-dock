@@ -51,6 +51,16 @@ export function buildRunHelpTrigger(input: RunHelpTriggerInput): string {
   return `Разберись с последним запуском \`${input.file}\`: ${outcome}, команда ${source}: ${command}${dirty}`
 }
 
+// The ✨ trigger for a chat with NO file open yet (an empty chat): the
+// button still works — it arms the conversation (the run-help marker is
+// sticky) and tells the model the directory appears on the first write.
+// The user states the actual wish in the next message. The wording is
+// neutral about which directory the tools see (Alt+click asks in a
+// fresh conversation but keeps the tools on the opened chat).
+export function buildFirstArtifactTrigger(): string {
+  return 'Если в рабочей директории чата ещё нет файлов — создай первый по моей следующей просьбе (write_artifact создаст директорию автоматически). Начни с list_artifacts, чтобы увидеть текущее состояние.'
+}
+
 // --- unsaved buffers pushed with the request ---------------------------------
 
 // Caps on the buffer push — the same limits main enforces when parsing the

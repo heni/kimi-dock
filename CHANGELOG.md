@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.4] - 2026-11-28
+
+### Added
+
+- **✨ Ask AI bootstraps the first artifact** — in a brand-new chat the
+  button used to be dead without an open file ("Open a file to ask about
+  it"), and main rejected run-help for a chat whose directory does not
+  exist yet (degrading the request to no tools). Both blockers are gone:
+  the button is live in an empty chat (a dedicated trigger tells the
+  model to create the first file on the user's next request), and the
+  run-help tools accept a missing directory — `list_artifacts` answers
+  with an empty list, `write_artifact` creates the directory on demand.
+  The skill now explains the empty-chat case to the model.
+- e2e: the picker probe asserts the Ask AI button is enabled in an
+  empty chat.
+
 ## [3.9.3] - 2026-11-28
 
 ### Added

@@ -1072,6 +1072,12 @@ async function runChatStream(
               `${rel} has unsaved changes in the user's editor. Ask the user to save (Ctrl+S) or discard them, then retry the write.`
             )
           }
+          // A brand-new chat has no directory yet: create the confined
+          // root before the realpath confinement, which would throw
+          // ENOENT on a missing dir (3.9.4: the first artifact
+          // bootstraps the directory). chatDir is lexically confined by
+          // resolveChatDir.
+          fs.mkdirSync(chatDir, { recursive: true })
           resolveInWorkspaceReal(chatDir, rel, true)
           writeTextFile(chatDir, rel, content)
           // The editor reconciles the open file conflict-aware on this
@@ -1152,16 +1158,11 @@ ipcMain.handle('kimi-api-stream-start', async (event, payload: unknown) => {
     try {
       const chatId = payload.runHelp.chatId
       const chatDir = resolveChatDir(getWorkspaceRoot(), chatId)
-      // Fail fast like proc-start: a missing chat dir would otherwise burn
-      // agent rounds against dead tools. The code lets the renderer
-      // degrade to a plain request instead of bricking the conversation.
-      if (!fs.existsSync(chatDir) || !fs.statSync(chatDir).isDirectory()) {
-        return {
-          success: false,
-          error: 'Chat directory does not exist',
-          code: 'RUN_HELP_CHAT_DIR_MISSING'
-        }
-      }
+      // A missing chat directory is NOT an error: a brand-new chat gets
+      // its directory on the first write_artifact (writeTextFile mkdirs),
+      // list_artifacts answers with an empty list, get_run_output with
+      // "no runs". Fail-fast here would make the ✨ bootstrap of the
+      // first artifact impossible (3.9.4).
       // The unsaved editor buffers of this chat, pushed per pass so the
       // tools read the user's current truth instead of the stale disk.
       const buffers = new Map<string, string>()
