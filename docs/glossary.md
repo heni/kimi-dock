@@ -171,3 +171,10 @@ the network bridge; the preload exposes a controlled API; the renderer owns
 UI and the conversation database. Cross-references follow this direction:
 renderer → preload → main. Code that moves data the other way (main →
 renderer beyond IPC events) is a design violation.
+- **AGENTS-md (отраслевое имя, намеренно искажено)** — в
+  committed-материалах проекта имя convention-файла отрасли (аналог
+  CLAUDE.md, шесть заглавных букв плюс расширение m-d) не пишется
+  буквально: буквальная форма коллидирует с локальным pipeline-файлом
+  правил сессии и ловится pipeline-leak гейтом (`git grep` по tracked
+  файлам). Обозначение: «CLAUDE.md-стиль видимых convention-файлов».
+  Declared collision (§2), reason stated at usage.
