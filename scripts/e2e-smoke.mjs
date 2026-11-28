@@ -213,6 +213,13 @@ try {
       try {
         await window.click(`[data-chat-id="${dirlessId}"]`)
         await window.waitForSelector('.artifact-empty', { timeout: 5000 })
+        // 3.9.4: ✨ Ask AI works with no file open — it bootstraps the
+        // first artifact (the tools create the directory on demand).
+        const askDisabled = await window.evaluate(() => {
+          const btn = document.querySelector('.run-ask-btn')
+          return btn instanceof HTMLButtonElement ? btn.disabled : null
+        })
+        if (askDisabled !== false) throw new Error('Ask AI stays disabled in an empty chat')
         await window.click('button[title="New file"]')
         await window.fill('.new-file-row input', 'e2e-picker-probe.md')
         await window.keyboard.press('Enter')

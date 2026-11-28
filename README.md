@@ -88,7 +88,9 @@
   the fix into the chat directory itself — writes are refused while the
   file has unsaved changes, and every path is confined to the chat
   directory by a symlink-aware check. Highlighted after a failed run;
-  Alt+click asks in a fresh conversation.
+  Alt+click asks in a fresh conversation. In an empty chat the button
+  bootstraps the first artifact instead (the directory appears on the
+  first write).
 
 ### Clipboard bridge
 
