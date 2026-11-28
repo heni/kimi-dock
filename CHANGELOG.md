@@ -5,6 +5,24 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [3.9.3] - 2026-11-28
+
+### Added
+
+- **The artifact chat picker lists conversations, not directories** —
+  previously a brand-new chat was invisible until its first artifact
+  created the directory (chicken-and-egg: nothing to select, nothing to
+  create into). The picker now merges every offline conversation (most
+  recent first, mirroring the sidebar; directory-less chats read "no
+  artifacts yet" and are fully selectable — their directory is created
+  on the first file) with orphan directories (artifacts of deleted
+  conversations, listed by name). The editor sidebar header shows the
+  open chat's title and works as a chat switcher (back to the picker),
+  so the association is visible and switching needs no detour through
+  the chat surface.
+- e2e: a picker step — a directory-less conversation is selectable and
+  its first created file mkdirs the directory (self-cleaning probe).
+
 ## [3.9.2] - 2026-11-27
 
 ### Added

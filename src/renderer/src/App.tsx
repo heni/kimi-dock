@@ -389,6 +389,7 @@ function App(): React.JSX.Element {
                 skillArmed={runSkillArmed}
                 onToggleSkill={() => setRunSkillArmed((armed) => !armed)}
                 onChatSelected={setEditorChatId}
+                onChatDeselected={() => setEditorChatId(null)}
                 hasSession={hasSession}
                 onAskAi={handleAskAi}
               />

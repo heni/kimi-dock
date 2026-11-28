@@ -69,13 +69,15 @@
 ### Artifact editor and run console
 
 - **Artifacts per chat** — every conversation has a directory in the
-  workspace folder; the editor surface edits those files (CodeMirror,
-  markdown preview with split, in-memory drafts). The editor picks up
-  external changes to the open file (AI run-help writes, other tools) on
-  surface activation and window focus — asks before touching an unsaved
-  draft when the disk diverges from it, and never lets a save silently
-  overwrite a newer disk version (a native Overwrite / Load / Cancel
-  question).
+  workspace folder (created on the first artifact); the editor surface
+  edits those files (CodeMirror, markdown preview with split, in-memory
+  drafts), the chat picker lists every conversation — even ones without
+  artifacts yet — and the header switches between them. The editor picks
+  up external changes to the open file (AI run-help writes, other tools)
+  on surface activation and window focus — asks before touching an
+  unsaved draft when the disk diverges from it, and never lets a save
+  silently overwrite a newer disk version (a native Overwrite / Load /
+  Cancel question).
 - **Run console** — run the current file (`/bin/bash -c`, streamed output,
   no stdin); the command resolves from a built-in table, overridable per
   chat via `run.json`, overridable ad hoc by editing the command line.

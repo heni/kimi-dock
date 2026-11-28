@@ -138,6 +138,12 @@ Rules:
   never reaches the disk). Created lazily on the first file write. _Not to
   be confused with:_ the conversation record in IndexedDB — the directory
   holds files, the record holds messages.
+- **Chat picker** — the editor surface's chat selector (3.9.3): merges
+  every offline conversation (most recent first) with orphan
+  directories; a conversation without a directory reads "no artifacts
+  yet" and is fully selectable — its directory appears on the first
+  artifact. The sidebar header's chat title is the switcher back to the
+  picker (`utils/chatPicker.ts` decides the merge).
 - **Artifact** — a non-hidden file inside a chat directory (dot-files and
   dot-directories — `.venv/`, `.git/`, `.bin/` — are hidden from the
   artifact list but stay accessible to the FS gateway; `run.json` is a
