@@ -13,6 +13,7 @@ import {
   saveAllDrafts
 } from '../utils/draftStore'
 import { decideExternalChange } from '../utils/editorSync'
+import { mergeChatPickerEntries } from '../utils/chatPicker'
 import { nextArtifactPath } from '../utils/artifactNav'
 import '../assets/EditorView.css'
 
@@ -23,8 +24,10 @@ interface EditorViewProps {
   skillArmed: boolean
   onToggleSkill: () => void
   // Picker selections are reported up so App's chat-switch draft guard
-  // knows which chat the editor is on.
+  // knows which chat the editor is on; the header button returns to the
+  // picker (App clears the chat → remount by key).
   onChatSelected?: (chatId: string) => void
+  onChatDeselected?: () => void
   hasSession: boolean
   // ✨ Ask AI in the run panel: App switches to the chat and enqueues the
   // trigger. chatId here is the editor's chat (the tools' target).
@@ -50,12 +53,15 @@ export default function EditorView({
   skillArmed,
   onToggleSkill,
   onChatSelected,
+  onChatDeselected,
   hasSession,
   onAskAi
 }: EditorViewProps): React.JSX.Element {
   const [activeChatId, setActiveChatId] = useState<string | null>(chatId)
   const [workspaceState, setWorkspaceState] = useState<'loading' | 'ready' | 'unset'>('loading')
-  const [chatDirs, setChatDirs] = useState<Array<{ id: string; title: string }>>([])
+  const [chatDirs, setChatDirs] = useState<
+    Array<{ id: string; title: string; hasDir: boolean }>
+  >([])
   const [files, setFiles] = useState<ArtifactFile[]>([])
   const [currentFile, setCurrentFile] = useState<string | null>(null)
   // Mirrors currentFile for post-await guards: a save that resolves after
@@ -98,7 +104,11 @@ export default function EditorView({
 
   const dirty = fileContent !== savedContent
 
-  // Workspace root: set → load chat dirs for the picker; unset → prompt.
+  // Workspace root: set → build the chat picker; unset → prompt. The
+  // picker lists CHATS, not directories: every offline conversation is
+  // selectable (a directory-less chat simply has an empty artifact
+  // list; the first write creates its directory on demand), and
+  // orphan directories — artifacts of deleted conversations — follow.
   const initWorkspace = useCallback(async (): Promise<void> => {
     setWorkspaceState('loading')
     const result = await window.api?.fsList('')
@@ -106,15 +116,16 @@ export default function EditorView({
       setWorkspaceState('unset')
       return
     }
-    const dirs = (result.entries ?? []).filter((e) => e.isDirectory)
-    let titles = new Map<string, string>()
+    const dirNames = (result.entries ?? [])
+      .filter((e) => e.isDirectory)
+      .map((e) => e.name)
+    let conversations: Array<{ id: string; title: string; updatedAt: number }> = []
     try {
-      const conversations = await offlineManager.getAllConversations()
-      titles = new Map(conversations.map((c) => [c.id, c.title]))
+      conversations = await offlineManager.getAllConversations()
     } catch {
-      // titles are cosmetic — fall back to ids
+      // conversations are the picker — fall back to directories only
     }
-    setChatDirs(dirs.map((d) => ({ id: d.name, title: titles.get(d.name) ?? d.name })))
+    setChatDirs(mergeChatPickerEntries(conversations, dirNames))
     setWorkspaceState('ready')
   }, [])
 
@@ -596,16 +607,17 @@ export default function EditorView({
       <div className="editor-view">
         <div className="editor-placeholder">
           <div className="empty-icon">📁</div>
-          <p>Pick a chat directory to edit its artifacts.</p>
+          <p>Pick a chat to edit its artifacts.</p>
           {chatDirs.length === 0 ? (
             <p className="editor-placeholder-sub">
-              No chat folders yet — open a chat&apos;s artifacts to create one.
+              No chats yet — start a conversation and it appears here.
             </p>
           ) : (
             <div className="chat-dir-list">
               {chatDirs.map((dir) => (
                 <button
                   key={dir.id}
+                  data-chat-id={dir.id}
                   className="chat-dir-item"
                   onClick={() => {
                     setActiveChatId(dir.id)
@@ -615,7 +627,9 @@ export default function EditorView({
                   }}
                 >
                   <span className="chat-dir-title">{dir.title}</span>
-                  <span className="chat-dir-id">{dir.id}</span>
+                  <span className="chat-dir-id">
+                    {dir.hasDir ? dir.id : 'no artifacts yet'}
+                  </span>
                   {dirtyCount(dir.id) > 0 && (
                     <span className="dirty-dot" title={`${dirtyCount(dir.id)} unsaved draft(s)`}>
                       ●
@@ -634,12 +648,23 @@ export default function EditorView({
   }
 
   const markdownOpen = isMarkdown(currentFile)
+  // On a fresh mount chatDirs is empty until initWorkspace resolves, so
+  // the header shows the raw chat id for one round-trip — acceptable;
+  // this branch requires activeChatId, so only the id fallback remains.
+  const activeChatTitle =
+    (activeChatId && chatDirs.find((d) => d.id === activeChatId)?.title) || activeChatId
 
   return (
     <div className="editor-view">
       <div className="editor-sidebar">
         <div className="editor-sidebar-header">
-          <span>Artifacts</span>
+          <button
+            className="editor-sidebar-chat"
+            title="Switch chat"
+            onClick={() => onChatDeselected?.()}
+          >
+            {activeChatTitle}
+          </button>
           <div className="editor-sidebar-actions">
             <button title="New file" onClick={() => setNewFileName('')}>
               ＋

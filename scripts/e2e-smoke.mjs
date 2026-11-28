@@ -183,16 +183,73 @@ try {
   console.log('[e2e] Editor surface shown:', editorState)
   await window.screenshot({ path: `${SHOTS}/04-editor.png` })
 
+  // The profile's workspace and its first real directory — step 7b reads
+  // the same values.
+  const settingsForWs = await window.evaluate(() => window.api.getSettings())
+  const workspaceRoot = settingsForWs?.workspaceRoot
+  const firstChatDir = workspaceRoot
+    ? fs
+        .readdirSync(workspaceRoot, { withFileTypes: true })
+        .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
+        .sort((a, b) => a.name.localeCompare(b.name))[0]
+    : undefined
+
+  // 7a) The picker lists CONVERSATIONS, not directories (3.9.3): a chat
+  // without an artifact directory appears as "no artifacts yet" and is
+  // selectable — its first created file mkdirs the directory on demand.
+  // The probe is self-cleaning (file + directory removed in the finally,
+  // or a leftover would pollute the workspace and flip the picker's
+  // hasDir label).
+  if (editorState === 'picker' && workspaceRoot) {
+    const dirlessId = await window.evaluate(() => {
+      for (const el of document.querySelectorAll('.chat-dir-item')) {
+        if (el.textContent?.includes('no artifacts yet')) return el.getAttribute('data-chat-id')
+      }
+      return null
+    })
+    if (dirlessId) {
+      const probeDir = path.join(workspaceRoot, dirlessId)
+      const probeFile = path.join(probeDir, 'e2e-picker-probe.md')
+      try {
+        await window.click(`[data-chat-id="${dirlessId}"]`)
+        await window.waitForSelector('.artifact-empty', { timeout: 5000 })
+        await window.click('button[title="New file"]')
+        await window.fill('.new-file-row input', 'e2e-picker-probe.md')
+        await window.keyboard.press('Enter')
+        await window.waitForFunction(
+          () =>
+            [...document.querySelectorAll('.artifact-item')].some((el) =>
+              el.textContent?.includes('e2e-picker-probe')
+            ),
+          { timeout: 5000 }
+        )
+        if (!fs.existsSync(probeFile)) throw new Error('the probe file is not on disk')
+        console.log('[e2e] Picker: dir-less chat selectable, first file created its directory')
+      } finally {
+        try {
+          if (fs.existsSync(probeFile)) fs.rmSync(probeFile)
+          if (fs.existsSync(probeDir)) fs.rmdirSync(probeDir)
+        } catch {
+          // best-effort cleanup
+        }
+      }
+      // Back to the picker for the artifact checks below.
+      await window.click('.editor-sidebar-chat')
+      await window.waitForSelector('.chat-dir-list', { timeout: 5000 })
+    } else {
+      console.log('[e2e] Picker dir-less check skipped: none in this profile')
+    }
+  }
+
   // The ✨ Ask AI button lives in the run panel, which renders once a chat
-  // is selected: pick the first chat dir when the picker offers one, then
-  // require the button (3.8.0). No live-model call — presence only. The
-  // wait is on the picker item itself: classifying the editor state first
-  // races EditorView's loading fall-through.
-  const firstDir = await window
-    .waitForSelector('.chat-dir-item', { timeout: 5000 })
-    .catch(() => null)
-  if (firstDir) {
-    await firstDir.click()
+  // is selected: pick the first chat WITH a directory when the picker
+  // offers one (dir-less conversations may sort first), then require the
+  // button (3.8.0). The wait is on the picker item itself: classifying
+  // the editor state first races EditorView's loading fall-through.
+  const dirItem = firstChatDir ? await window.$(`[data-chat-id="${firstChatDir.name}"]`) : null
+  const pickItem = dirItem ?? (await window.$('.chat-dir-item'))
+  if (pickItem) {
+    await pickItem.click()
     await window.waitForSelector('.run-ask-btn', { timeout: 5000 })
     console.log('[e2e] Ask AI button present in the run panel')
   } else {
@@ -212,20 +269,17 @@ try {
   // must ask (native dialog, driven by a main-process patch) instead of
   // silently overwriting. The harness writes the file bytes directly —
   // bypassing the app's FS gateway, a genuinely external change — and
-  // restores them in the finally. The first picker item is the first
-  // non-hidden directory of the workspace root (the gateway sorts
-  // directories first by name).
+  // restores them in the finally. The chat is addressed by
+  // [data-chat-id="<first directory>"] — since 3.9.3 the picker lists
+  // conversations by recency, so the first PICKER item may be a dir-less
+  // chat; the class fallback (first .chat-dir-item) picks the most
+  // recent conversation, and joining its artifact with firstChatDir
+  // self-guards via existsSync.
   let invalidationDone = false
-  const settingsForWs = await window.evaluate(() => window.api.getSettings())
-  const workspaceRoot = settingsForWs?.workspaceRoot
   const artifactItem = await window
     .waitForSelector('.artifact-item', { timeout: 5000 })
     .catch(() => null)
   if (workspaceRoot && artifactItem) {
-    const firstChatDir = fs
-      .readdirSync(workspaceRoot, { withFileTypes: true })
-      .filter((d) => d.isDirectory() && !d.name.startsWith('.'))
-      .sort((a, b) => a.name.localeCompare(b.name))[0]
     const relPath = await artifactItem.getAttribute('title')
     const absPath =
       firstChatDir && relPath ? path.join(workspaceRoot, firstChatDir.name, relPath) : null
