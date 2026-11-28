@@ -648,6 +648,9 @@ export default function EditorView({
   }
 
   const markdownOpen = isMarkdown(currentFile)
+  // On a fresh mount chatDirs is empty until initWorkspace resolves, so
+  // the header shows the raw chat id for one round-trip — acceptable;
+  // this branch requires activeChatId, so only the id fallback remains.
   const activeChatTitle =
     (activeChatId && chatDirs.find((d) => d.id === activeChatId)?.title) || activeChatId
 
@@ -660,7 +663,7 @@ export default function EditorView({
             title="Switch chat"
             onClick={() => onChatDeselected?.()}
           >
-            {activeChatTitle ?? 'Artifacts'}
+            {activeChatTitle}
           </button>
           <div className="editor-sidebar-actions">
             <button title="New file" onClick={() => setNewFileName('')}>

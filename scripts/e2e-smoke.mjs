@@ -269,9 +269,12 @@ try {
   // must ask (native dialog, driven by a main-process patch) instead of
   // silently overwriting. The harness writes the file bytes directly —
   // bypassing the app's FS gateway, a genuinely external change — and
-  // restores them in the finally. The first picker item is the first
-  // non-hidden directory of the workspace root (the gateway sorts
-  // directories first by name).
+  // restores them in the finally. The chat is addressed by
+  // [data-chat-id="<first directory>"] — since 3.9.3 the picker lists
+  // conversations by recency, so the first PICKER item may be a dir-less
+  // chat; the class fallback (first .chat-dir-item) picks the most
+  // recent conversation, and joining its artifact with firstChatDir
+  // self-guards via existsSync.
   let invalidationDone = false
   const artifactItem = await window
     .waitForSelector('.artifact-item', { timeout: 5000 })
